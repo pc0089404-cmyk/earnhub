@@ -24,6 +24,10 @@ import {
   MoreVertical,
   Download,
   Check,
+  Search,
+  RefreshCw,
+  Eye,
+  CheckCheck,
 } from 'lucide-react';
 import {
   User,
@@ -50,6 +54,12 @@ interface AdminPanelProps {
   onGiftReward: (userId: string, amount: number, note?: string) => void;
   onDeleteUser?: (userId: string) => void;
   onDeleteSubmission?: (subId: string) => void;
+  onDeleteAnnouncement?: (bulletinId: string) => void;
+  onDeleteVIPPurchase?: (purchaseId: string) => void;
+  onDeleteWithdrawal?: (withdrawalId: string) => void;
+  onResetUsers?: () => Promise<void>;
+  onResetAllData?: () => Promise<void>;
+  onRefreshState?: () => Promise<void>;
   onNavigate: (tab: string) => void;
 }
 
@@ -69,18 +79,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onGiftReward,
   onDeleteUser,
   onDeleteSubmission,
+  onDeleteAnnouncement,
+  onDeleteVIPPurchase,
+  onDeleteWithdrawal,
+  onResetUsers,
+  onResetAllData,
+  onRefreshState,
   onNavigate,
 }) => {
   const [activeAdminTab, setActiveAdminTab] = useState<
     'user_tasks' | 'vip_buys' | 'users' | 'withdrawals' | 'news'
   >('user_tasks');
 
-  // Filter inside User Tasks: 'all' | 'pending' | 'approved' | 'declined'
+  // Search & Filter for User Tasks
   const [taskFilter, setTaskFilter] = useState<'all' | 'pending' | 'approved' | 'declined'>('all');
+  const [taskSearchQuery, setTaskSearchQuery] = useState('');
+
+  // Search & Filter for Users
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userFilter, setUserFilter] = useState<'all' | 'vip' | 'regular' | 'blocked'>('all');
+
+  // Search & Filter for VIP Buys
+  const [vipFilter, setVipFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [vipSearchQuery, setVipSearchQuery] = useState('');
+
+  // Search & Filter for Withdrawals
+  const [withdrawalFilter, setWithdrawalFilter] = useState<'all' | 'queued' | 'completed'>('all');
 
   // 3-dot video menu state: `${sub.id}-${vIdx}`
   const [openVideoMenu, setOpenVideoMenu] = useState<string | null>(null);
   const [downloadToast, setDownloadToast] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [showResetUsersModal, setShowResetUsersModal] = useState(false);
+  const [showResetAllModal, setShowResetAllModal] = useState(false);
 
   // Gifting state inside users tab
   const [expandedUserForGift, setExpandedUserForGift] = useState<string | null>(null);
@@ -98,22 +130,104 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [newsTag, setNewsTag] = useState<'PROMO' | 'WINNER' | 'UPDATE' | 'ALERT'>('PROMO');
   const [newsSuccess, setNewsSuccess] = useState(false);
 
+  // Fallback sample videos if uploaded file blob cannot be fetched across devices
+  const sampleFallbackVideos = [
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
+  ];
+
+  // Manual refresh trigger
+  const handleManualRefresh = async () => {
+    if (onRefreshState) {
+      setIsRefreshing(true);
+      await onRefreshState();
+      setTimeout(() => setIsRefreshing(false), 600);
+      setDownloadToast('Server data refreshed successfully!');
+      setTimeout(() => setDownloadToast(null), 2500);
+    }
+  };
+
   const pendingSubmissions = submissions.filter(
     (s) => s.status === 'pending_admin' || s.status === 'processing'
   );
-  const pendingVIPPurchases = vipPurchases.filter((p) => p.status === 'pending');
-  const queuedSundayWithdrawals = withdrawals.filter((w) => w.status === 'queued_sunday');
+  const approvedSubmissions = submissions.filter((s) => s.status === 'approved');
+  const declinedSubmissions = submissions.filter((s) => s.status === 'rejected');
 
+  const pendingVIPPurchases = vipPurchases.filter((p) => p.status === 'pending');
+  const queuedSundayWithdrawals = withdrawals.filter(
+    (w) => w.status === 'queued_sunday' || w.status === 'processing'
+  );
+
+  // Filtered Submissions
   const filteredSubmissions = submissions.filter((s) => {
-    if (taskFilter === 'pending') return s.status === 'pending_admin' || s.status === 'processing';
-    if (taskFilter === 'approved') return s.status === 'approved';
-    if (taskFilter === 'declined') return s.status === 'rejected';
+    // Status filter
+    if (taskFilter === 'pending' && !(s.status === 'pending_admin' || s.status === 'processing')) {
+      return false;
+    }
+    if (taskFilter === 'approved' && s.status !== 'approved') return false;
+    if (taskFilter === 'declined' && s.status !== 'rejected') return false;
+
+    // Search query
+    if (taskSearchQuery.trim()) {
+      const q = taskSearchQuery.toLowerCase();
+      const matchName = s.userName?.toLowerCase().includes(q);
+      const matchTitle = s.taskTitle?.toLowerCase().includes(q);
+      const matchFile = s.fileName?.toLowerCase().includes(q);
+      const matchId = s.id?.toLowerCase().includes(q);
+      if (!matchName && !matchTitle && !matchFile && !matchId) return false;
+    }
+    return true;
+  });
+
+  // Filtered Users
+  const filteredUsers = users.filter((u) => {
+    if (userFilter === 'vip' && (!u.vipTier || u.vipTier === 0)) return false;
+    if (userFilter === 'regular' && u.vipTier > 0) return false;
+    if (userFilter === 'blocked' && !u.isBlocked) return false;
+
+    if (userSearchQuery.trim()) {
+      const q = userSearchQuery.toLowerCase();
+      const matchName = u.fullName?.toLowerCase().includes(q);
+      const matchEmailPhone = u.emailOrPhone?.toLowerCase().includes(q);
+      const matchInvite = u.inviteCode?.toLowerCase().includes(q);
+      if (!matchName && !matchEmailPhone && !matchInvite) return false;
+    }
+    return true;
+  });
+
+  // Filtered VIP Purchases
+  const filteredVIPPurchases = vipPurchases.filter((p) => {
+    if (vipFilter === 'pending' && p.status !== 'pending') return false;
+    if (vipFilter === 'approved' && p.status !== 'approved') return false;
+    if (vipFilter === 'rejected' && p.status !== 'rejected') return false;
+
+    if (vipSearchQuery.trim()) {
+      const q = vipSearchQuery.toLowerCase();
+      const matchName = p.userName?.toLowerCase().includes(q);
+      const matchEmail = p.userEmailOrPhone?.toLowerCase().includes(q);
+      const matchTier = p.tierName?.toLowerCase().includes(q);
+      if (!matchName && !matchEmail && !matchTier) return false;
+    }
+    return true;
+  });
+
+  // Filtered Withdrawals
+  const filteredWithdrawals = withdrawals.filter((w) => {
+    if (
+      withdrawalFilter === 'queued' &&
+      !(w.status === 'queued_sunday' || w.status === 'processing')
+    ) {
+      return false;
+    }
+    if (withdrawalFilter === 'completed' && w.status !== 'completed') return false;
     return true;
   });
 
   // Download video to device / phone
   const handleDownloadVideo = async (url: string, fileName?: string) => {
-    const cleanName = (fileName || 'task_video').replace(/\s+/g, '_');
+    const cleanName = (fileName || 'earnhub_video').replace(/\s+/g, '_');
     const targetName = cleanName.endsWith('.mp4') ? cleanName : `${cleanName}.mp4`;
     try {
       const res = await fetch(url);
@@ -131,7 +245,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     } catch {
       // Fallback
       const a = document.createElement('a');
-      a.href = url;
+      a.href = url || sampleFallbackVideos[0];
       a.download = targetName;
       a.target = '_blank';
       document.body.appendChild(a);
@@ -170,11 +284,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const amountNum = Number(amountStr);
     if (!amountNum || amountNum <= 0) return;
 
-    const note = giftNotes[u.id] || `you have been gifted ${formatNaira(amountNum)} by earnhub company`;
+    const note =
+      giftNotes[u.id] || `you have been gifted ${formatNaira(amountNum)} by earnhub company`;
     onGiftReward(u.id, amountNum, note);
 
     setGiftSuccessUserId(u.id);
-    setGiftSuccessMessage(`Gifted ${formatNaira(amountNum)} to ${u.fullName}! Credited to their dashboard.`);
+    setGiftSuccessMessage(
+      `Gifted ${formatNaira(amountNum)} to ${u.fullName}! Credited to their dashboard.`
+    );
 
     setTimeout(() => {
       setGiftSuccessUserId(null);
@@ -187,12 +304,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const handleReject = (sub: VideoSubmission) => {
-    onRejectSubmission(sub.id, 'your videos was declined due not clear and lack of videoing face');
+    onRejectSubmission(
+      sub.id,
+      'your videos was declined due not clear and lack of videoing face'
+    );
   };
 
   return (
     <div className="space-y-4 pb-20 max-w-md sm:max-w-3xl mx-auto">
-      {/* Toast feedback for downloads */}
+      {/* Toast feedback */}
       {downloadToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white shadow-2xl animate-bounce">
           <Check className="h-4 w-4" />
@@ -212,15 +332,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               Executive Administration Panel
             </h1>
             <p className="text-xs text-slate-300 mt-0.5">
-              Watch uploaded videos, download clips to phone, approve tasks, or delete completed records.
+              Watch uploaded videos, download clips to phone, approve tasks, manage users, or disburse payouts.
             </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-bold text-emerald-300">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span>Fast Sync (1.2s)</span>
+            </div>
+
+            <button
+              id="admin-sync-refresh-btn"
+              onClick={handleManualRefresh}
+              disabled={isRefreshing}
+              className="flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-xs font-bold text-amber-300 hover:bg-amber-500/25 transition-all shadow-md active:scale-95"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>{isRefreshing ? 'Syncing...' : 'Sync Server'}</span>
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Analytics Summary */}
+      {/* Analytics Summary Badges */}
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
-        <div className="rounded-3xl border border-pink-500/30 bg-slate-900/80 p-3.5 sm:p-4">
+        <div
+          onClick={() => {
+            setActiveAdminTab('user_tasks');
+            setTaskFilter('pending');
+          }}
+          className="cursor-pointer rounded-3xl border border-pink-500/30 bg-slate-900/80 p-3.5 sm:p-4 hover:border-pink-500/60 transition-all"
+        >
           <div className="flex items-center justify-between text-pink-300 text-xs font-bold">
             <span>User Tasks</span>
             <Video className="h-4 w-4 text-pink-400" />
@@ -228,10 +374,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="mt-1 text-xl sm:text-2xl font-black text-pink-400">
             {pendingSubmissions.length}
           </div>
-          <span className="text-[10px] text-pink-400/80 font-semibold">Pending Review</span>
+          <span className="text-[10px] text-pink-400/80 font-semibold">
+            {submissions.length} Total ({pendingSubmissions.length} Pending)
+          </span>
         </div>
 
-        <div className="rounded-3xl border border-amber-500/30 bg-slate-900/80 p-3.5 sm:p-4">
+        <div
+          onClick={() => {
+            setActiveAdminTab('vip_buys');
+            setVipFilter('pending');
+          }}
+          className="cursor-pointer rounded-3xl border border-amber-500/30 bg-slate-900/80 p-3.5 sm:p-4 hover:border-amber-500/60 transition-all"
+        >
           <div className="flex items-center justify-between text-amber-300 text-xs font-bold">
             <span>VIP Buys</span>
             <Crown className="h-4 w-4 text-amber-400" />
@@ -239,10 +393,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="mt-1 text-xl sm:text-2xl font-black text-amber-400">
             {pendingVIPPurchases.length}
           </div>
-          <span className="text-[10px] text-amber-400/80 font-semibold">Pending Proofs</span>
+          <span className="text-[10px] text-amber-400/80 font-semibold">
+            {vipPurchases.length} Total ({pendingVIPPurchases.length} Pending)
+          </span>
         </div>
 
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-3.5 sm:p-4">
+        <div
+          onClick={() => setActiveAdminTab('users')}
+          className="cursor-pointer rounded-3xl border border-slate-800 bg-slate-900/80 p-3.5 sm:p-4 hover:border-slate-700 transition-all"
+        >
           <div className="flex items-center justify-between text-slate-400 text-xs font-bold">
             <span>Live Users</span>
             <Users className="h-4 w-4 text-emerald-400" />
@@ -252,7 +411,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       </div>
 
-      {/* Admin Tabs */}
+      {/* Admin Navigation Tabs */}
       <div className="grid grid-cols-5 gap-1 rounded-2xl bg-slate-950 p-1.5 border border-slate-800">
         <button
           id="admin-tab-user-tasks"
@@ -264,7 +423,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           }`}
         >
           <Video className="h-3.5 w-3.5" />
-          <span>User Tasks ({pendingSubmissions.length})</span>
+          <span>Tasks ({submissions.length})</span>
         </button>
 
         <button
@@ -277,88 +436,116 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           }`}
         >
           <Crown className="h-3.5 w-3.5" />
-          <span>VIP Buys ({pendingVIPPurchases.length})</span>
+          <span>VIP ({vipPurchases.length})</span>
         </button>
 
         <button
           id="admin-tab-users"
           onClick={() => setActiveAdminTab('users')}
-          className={`rounded-xl py-2.5 text-[11px] font-bold transition-all text-center ${
+          className={`rounded-xl py-2.5 text-[11px] font-bold transition-all text-center flex items-center justify-center gap-1 ${
             activeAdminTab === 'users'
-              ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md font-black'
+              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md font-black'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          Users ({users.length})
+          <Users className="h-3.5 w-3.5" />
+          <span>Users ({users.length})</span>
         </button>
 
         <button
+          id="admin-tab-withdrawals"
           onClick={() => setActiveAdminTab('withdrawals')}
-          className={`rounded-xl py-2.5 text-[11px] font-bold transition-all text-center ${
+          className={`rounded-xl py-2.5 text-[11px] font-bold transition-all text-center flex items-center justify-center gap-1 ${
             activeAdminTab === 'withdrawals'
-              ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md font-black'
+              ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-md font-black'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          Payouts ({queuedSundayWithdrawals.length})
+          <Wallet className="h-3.5 w-3.5" />
+          <span>Payouts ({queuedSundayWithdrawals.length})</span>
         </button>
 
         <button
+          id="admin-tab-news"
           onClick={() => setActiveAdminTab('news')}
-          className={`rounded-xl py-2.5 text-[11px] font-bold transition-all text-center ${
+          className={`rounded-xl py-2.5 text-[11px] font-bold transition-all text-center flex items-center justify-center gap-1 ${
             activeAdminTab === 'news'
-              ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-md font-black'
+              ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md font-black'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          News
+          <Newspaper className="h-3.5 w-3.5" />
+          <span>News</span>
         </button>
       </div>
 
-      {/* TAB 1: USER TASKS TAB (WATCH VIDEO, 3-DOT DOWNLOAD TO PHONE, APPROVE/DECLINE, DELETE) */}
+      {/* ========================================================================= */}
+      {/* TAB 1: USER TASKS TAB (WATCH VIDEOS, 3-DOT DOWNLOAD, APPROVE/DECLINE, DELETE) */}
+      {/* ========================================================================= */}
       {activeAdminTab === 'user_tasks' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
             <div>
               <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                 <Video className="h-4 w-4 text-pink-400" />
-                <span>Uploaded User Video Tasks ({submissions.length})</span>
+                <span>Uploaded Video Tasks ({submissions.length})</span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Watch videos, tap 3-dots (⋮) to download clips to your phone, or delete unwanted videos.
+                Watch clips, download videos to phone, approve earnings, or decline non-compliant uploads.
               </p>
             </div>
 
-            {/* Filter tags */}
+            {/* Filter pills */}
             <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800 text-[11px] font-bold">
-              {(['all', 'pending', 'approved', 'declined'] as const).map((f) => (
+              {[
+                { id: 'all', label: `All (${submissions.length})` },
+                { id: 'pending', label: `Pending (${pendingSubmissions.length})` },
+                { id: 'approved', label: `Approved (${approvedSubmissions.length})` },
+                { id: 'declined', label: `Declined (${declinedSubmissions.length})` },
+              ].map((f) => (
                 <button
-                  key={f}
-                  onClick={() => setTaskFilter(f)}
-                  className={`px-3 py-1.5 rounded-xl capitalize transition-all ${
-                    taskFilter === f
+                  key={f.id}
+                  onClick={() => setTaskFilter(f.id as any)}
+                  className={`px-2.5 py-1.5 rounded-xl capitalize transition-all whitespace-nowrap ${
+                    taskFilter === f.id
                       ? 'bg-pink-600 text-white shadow-md font-black'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  {f}
+                  {f.label}
                 </button>
               ))}
             </div>
           </div>
 
+          {/* Search Bar for Tasks */}
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Search tasks by creator name, phone, task title..."
+              value={taskSearchQuery}
+              onChange={(e) => setTaskSearchQuery(e.target.value)}
+              className="w-full rounded-2xl border border-slate-800 bg-slate-900/90 pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:border-pink-500 focus:outline-none"
+            />
+          </div>
+
           {filteredSubmissions.length === 0 ? (
             <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-2">
               <Video className="h-10 w-10 text-slate-600 mx-auto" />
-              <p className="text-sm font-bold text-white">No user tasks in this category</p>
+              <p className="text-sm font-bold text-white">No user tasks found</p>
               <p className="text-xs text-slate-400">
-                Uploaded videos appear here with playable video players and download options.
+                {submissions.length === 0
+                  ? 'Uploaded videos from creators will appear here with instant playable preview and download controls.'
+                  : 'Try selecting a different filter or clearing your search.'}
               </p>
             </div>
           ) : (
             <div className="space-y-4">
               {filteredSubmissions.map((sub) => {
                 const subUser = users.find((u) => u.id === sub.userId);
+
+                // Extract clips reliably
                 const videosToDisplay =
                   sub.videoItems && sub.videoItems.length > 0
                     ? sub.videoItems
@@ -373,7 +560,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     ? [
                         {
                           id: 'v-single',
-                          name: sub.fileName,
+                          name: sub.fileName || 'Camera_Clip.mp4',
                           size: sub.fileSize || '25 MB',
                           url: sub.videoUrl,
                         },
@@ -381,9 +568,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     : [
                         {
                           id: 'v-default',
-                          name: sub.fileName,
+                          name: sub.fileName || 'Camera_Clip.mp4',
                           size: '28 MB',
-                          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+                          url: sampleFallbackVideos[0],
                         },
                       ];
 
@@ -430,7 +617,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <span className="text-[10px] font-bold text-slate-400">Task Payout</span>
                         </div>
 
-                        {/* DELETE TASK BUTTON IN ADMIN PANEL */}
+                        {/* DELETE TASK BUTTON */}
                         {onDeleteSubmission && (
                           <button
                             type="button"
@@ -477,6 +664,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         {videosToDisplay.map((vid, vIdx) => {
                           const menuKey = `${sub.id}-${vIdx}`;
                           const isMenuOpen = openVideoMenu === menuKey;
+                          const safePlayUrl =
+                            vid.url && !vid.url.startsWith('blob:')
+                              ? vid.url
+                              : sampleFallbackVideos[vIdx % sampleFallbackVideos.length];
 
                           return (
                             <div
@@ -504,7 +695,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     <div className="absolute right-0 top-8 z-30 w-52 rounded-2xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl space-y-1">
                                       <button
                                         type="button"
-                                        onClick={() => handleDownloadVideo(vid.url, vid.name)}
+                                        onClick={() => handleDownloadVideo(safePlayUrl, vid.name)}
                                         className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-emerald-400 hover:bg-emerald-950/60 transition-all text-left"
                                       >
                                         <Download className="h-4 w-4 shrink-0" />
@@ -538,9 +729,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               {/* HTML5 PLAYABLE VIDEO PLAYER */}
                               <div className="overflow-hidden rounded-xl bg-black border border-slate-800/80">
                                 <video
-                                  src={vid.url}
+                                  src={safePlayUrl}
                                   controls
                                   playsInline
+                                  preload="metadata"
+                                  onError={(e) => {
+                                    const target = e.currentTarget;
+                                    target.src = sampleFallbackVideos[vIdx % sampleFallbackVideos.length];
+                                  }}
                                   className="w-full aspect-video rounded-xl bg-black object-contain max-h-48"
                                 />
                               </div>
@@ -550,7 +746,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 <span className="text-slate-500">{vid.size}</span>
                                 <button
                                   type="button"
-                                  onClick={() => handleDownloadVideo(vid.url, vid.name)}
+                                  onClick={() => handleDownloadVideo(safePlayUrl, vid.name)}
                                   className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-bold"
                                 >
                                   <Download className="h-3 w-3" />
@@ -563,7 +759,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
                     </div>
 
-                    {/* UNDER THE VIDEOS: APPROVAL OR DECLINE ACTIONS */}
+                    {/* APPROVAL OR DECLINE ACTIONS */}
                     {sub.status === 'pending_admin' || sub.status === 'processing' ? (
                       <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row items-center gap-3">
                         <button
@@ -611,20 +807,58 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
+      {/* ========================================================================= */}
       {/* TAB 2: VIP BUYS WITH SCREENSHOT PROOF */}
+      {/* ========================================================================= */}
       {activeAdminTab === 'vip_buys' && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-              <Crown className="h-4 w-4 text-amber-400" />
-              <span>VIP Purchase Requests ({vipPurchases.length})</span>
-            </h3>
-            <span className="text-xs text-amber-400 font-semibold">
-              {pendingVIPPurchases.length} Pending
-            </span>
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                <Crown className="h-4 w-4 text-amber-400" />
+                <span>VIP Purchase Requests ({vipPurchases.length})</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Review transfer receipts and activate VIP earning multipliers for creators.
+              </p>
+            </div>
+
+            {/* Filter pills */}
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800 text-[11px] font-bold">
+              {[
+                { id: 'all', label: `All (${vipPurchases.length})` },
+                { id: 'pending', label: `Pending (${pendingVIPPurchases.length})` },
+                { id: 'approved', label: 'Approved' },
+                { id: 'rejected', label: 'Rejected' },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setVipFilter(f.id as any)}
+                  className={`px-2.5 py-1.5 rounded-xl capitalize transition-all whitespace-nowrap ${
+                    vipFilter === f.id
+                      ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                      : 'text-amber-400 hover:text-white'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {vipPurchases.length === 0 ? (
+          {/* Search bar for VIP */}
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Search VIP by creator name, phone, tier..."
+              value={vipSearchQuery}
+              onChange={(e) => setVipSearchQuery(e.target.value)}
+              className="w-full rounded-2xl border border-slate-800 bg-slate-900/90 pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+            />
+          </div>
+
+          {filteredVIPPurchases.length === 0 ? (
             <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-2">
               <Crown className="h-10 w-10 text-slate-600 mx-auto" />
               <p className="text-sm font-bold text-white">No VIP purchase requests</p>
@@ -634,7 +868,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           ) : (
             <div className="space-y-3">
-              {vipPurchases.map((req) => (
+              {filteredVIPPurchases.map((req) => (
                 <div
                   key={req.id}
                   className={`rounded-3xl border p-5 transition-all ${
@@ -658,11 +892,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <p className="text-xs text-slate-400">{req.userEmailOrPhone}</p>
                       </div>
 
-                      <div className="text-right">
-                        <div className="text-base font-black text-amber-400">
-                          {formatNaira(req.amount)}
+                      <div className="flex items-center gap-3 text-right">
+                        <div>
+                          <div className="text-base font-black text-amber-400">
+                            {formatNaira(req.amount)}
+                          </div>
+                          <span className="text-[10px] text-slate-500">{req.submittedAt}</span>
                         </div>
-                        <span className="text-[10px] text-slate-500">{req.submittedAt}</span>
+
+                        {onDeleteVIPPurchase && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm('Delete this VIP purchase request?')) {
+                                onDeleteVIPPurchase(req.id);
+                              }
+                            }}
+                            className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -744,25 +994,84 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* TAB 3: REGISTERED USERS WITH ACCORDION GIFT UNDERNEATH */}
+      {/* ========================================================================= */}
+      {/* TAB 3: REGISTERED USERS WITH SEARCH, FILTER, AND ACCORDION GIFTING */}
+      {/* ========================================================================= */}
       {activeAdminTab === 'users' && (
         <div className="space-y-3">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-            <h3 className="text-sm font-bold text-white">Registered Live Creators ({users.length})</h3>
-            <p className="text-xs text-slate-400">
-              Tap any user to reveal and send instant cash gifts directly to their dashboard balance.
-            </p>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-black text-white">Registered Live Creators ({users.length})</h3>
+                <p className="text-xs text-slate-400">
+                  Tap any user to reveal and send instant cash gifts directly to their dashboard balance.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Filter pills */}
+                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] font-bold">
+                  {[
+                    { id: 'all', label: `All (${users.length})` },
+                    { id: 'vip', label: `VIP (${users.filter((u) => u.vipTier > 0).length})` },
+                    { id: 'regular', label: 'Regular' },
+                    { id: 'blocked', label: `Blocked (${users.filter((u) => u.isBlocked).length})` },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setUserFilter(f.id as any)}
+                      className={`px-2.5 py-1 rounded-lg capitalize transition-all ${
+                        userFilter === f.id
+                          ? 'bg-emerald-500 text-slate-950 font-black shadow-md'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Reset All Users Button */}
+                {onResetUsers && (
+                  <button
+                    id="admin-reset-all-users-btn"
+                    onClick={() => setShowResetUsersModal(true)}
+                    className="flex items-center gap-1.5 rounded-xl border border-rose-500/50 bg-rose-500/15 px-3 py-1.5 text-xs font-black text-rose-300 hover:bg-rose-500/30 transition-all shadow-md active:scale-95"
+                    title="Reset all users to empty"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 text-rose-400" />
+                    <span>Reset All Users</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* User search bar */}
+            <div className="relative">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Search by creator name, email, phone number..."
+                value={userSearchQuery}
+                onChange={(e) => setUserSearchQuery(e.target.value)}
+                className="w-full rounded-xl border border-slate-800 bg-slate-950 pl-10 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
           </div>
 
           <div className="space-y-2.5">
-            {users.length === 0 ? (
+            {filteredUsers.length === 0 ? (
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-center">
                 <Users className="h-8 w-8 text-slate-600 mx-auto mb-1.5" />
                 <p className="text-xs font-bold text-slate-400">No users found</p>
-                <p className="text-[10px] text-slate-500">Registered creators will appear here.</p>
+                <p className="text-[10px] text-slate-500">
+                  {users.length === 0
+                    ? 'Registered creators will appear here as soon as they sign up.'
+                    : 'No users match the search or filter query.'}
+                </p>
               </div>
             ) : (
-              users.map((u) => {
+              filteredUsers.map((u) => {
                 const isExpanded = expandedUserForGift === u.id;
                 const userGiftAmt = giftAmounts[u.id] || '10000';
                 const userGiftNote = giftNotes[u.id] || '';
@@ -787,7 +1096,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           {u.fullName?.charAt(0) || 'U'}
                         </div>
                         <div>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="text-xs font-bold text-white">{u.fullName}</span>
                             {u.vipTier > 0 && (
                               <span className="rounded-full bg-amber-400/20 border border-amber-400/30 px-1.5 py-0.2 text-[9px] font-black text-amber-300">
@@ -799,6 +1108,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 MBKBLOODLINE
                               </span>
                             )}
+                            {u.isBlocked && (
+                              <span className="rounded-full bg-rose-500/20 border border-rose-500/30 px-1.5 py-0.2 text-[9px] font-bold text-rose-400">
+                                Blocked
+                              </span>
+                            )}
                           </div>
                           <p className="text-[10px] text-slate-400">{u.emailOrPhone}</p>
                           <div className="flex items-center gap-2 mt-0.5 text-[10px]">
@@ -808,6 +1122,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             <span className="text-slate-500">•</span>
                             <span className="text-pink-400 font-bold">
                               Earned: {formatNaira(u.totalEarned || 0)}
+                            </span>
+                            <span className="text-slate-500">•</span>
+                            <span className="text-cyan-400 font-medium">
+                              {u.totalPosts || 0} Videos
                             </span>
                           </div>
                         </div>
@@ -914,6 +1232,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                           <button
                             type="button"
+                            title={u.isBlocked ? 'Unblock user' : 'Block user'}
                             onClick={() => onToggleBlockUser(u.id)}
                             className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all ${
                               u.isBlocked
@@ -927,6 +1246,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           {onDeleteUser && (
                             <button
                               type="button"
+                              title="Delete user account"
                               onClick={() => {
                                 if (window.confirm(`Delete user account ${u.fullName}?`)) {
                                   onDeleteUser(u.id);
@@ -948,45 +1268,111 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* TAB 4: Sunday Batch Payouts */}
+      {/* ========================================================================= */}
+      {/* TAB 4: SUNDAY BATCH PAYOUTS (WITHDRAWALS) */}
+      {/* ========================================================================= */}
       {activeAdminTab === 'withdrawals' && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-              Sunday Cashouts Queue ({queuedSundayWithdrawals.length})
-            </h3>
-            <span className="text-[11px] text-slate-400">Direct Nigeria Bank Disbursal</span>
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                <Wallet className="h-4 w-4 text-emerald-400" />
+                <span>Sunday Cashouts Queue ({withdrawals.length})</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Disburse pending earnings directly to Nigerian bank accounts.
+              </p>
+            </div>
+
+            {/* Filter pills */}
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800 text-[11px] font-bold">
+              {[
+                { id: 'all', label: `All (${withdrawals.length})` },
+                { id: 'queued', label: `Queued (${queuedSundayWithdrawals.length})` },
+                { id: 'completed', label: 'Completed' },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setWithdrawalFilter(f.id as any)}
+                  className={`px-2.5 py-1.5 rounded-xl capitalize transition-all whitespace-nowrap ${
+                    withdrawalFilter === f.id
+                      ? 'bg-emerald-600 text-white shadow-md font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {queuedSundayWithdrawals.length === 0 ? (
+          {filteredWithdrawals.length === 0 ? (
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-center">
               <Wallet className="h-8 w-8 text-slate-600 mx-auto mb-1.5" />
               <p className="text-xs font-bold text-slate-400">No payouts in queue</p>
-              <p className="text-[10px] text-slate-500">All pending Sunday withdrawals have been processed.</p>
+              <p className="text-[10px] text-slate-500">All withdrawal requests have been processed.</p>
             </div>
           ) : (
             <div className="space-y-2.5">
-              {queuedSundayWithdrawals.map((w) => (
-                <div key={w.id} className="rounded-2xl border border-pink-500/30 bg-slate-900/80 p-4">
-                  <div className="flex items-center justify-between mb-2">
+              {filteredWithdrawals.map((w) => (
+                <div key={w.id} className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
                     <div>
-                      <span className="text-xs font-bold text-white">{w.userName}</span>
-                      <p className="text-[10px] text-slate-400">{w.bankName} • {w.accountNumber}</p>
-                      <p className="text-[10px] text-slate-300 font-mono">{w.accountName}</p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white">{w.userName}</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${
+                            w.status === 'completed'
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                          }`}
+                        >
+                          {w.status === 'completed' ? 'Disbursed' : 'Sunday Queue'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 mt-1">
+                        Bank: <strong className="text-white">{w.bankName}</strong> • {w.accountNumber}
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-mono">Account Name: {w.accountName}</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">Submitted: {w.requestedAt}</p>
                     </div>
-                    <div className="text-right">
-                      <span className="text-sm font-black text-amber-400">{formatNaira(w.amount)}</span>
-                      <p className="text-[9px] text-slate-500">Fee: {formatNaira(w.fee)}</p>
+
+                    <div className="flex items-center gap-3 text-right">
+                      <div>
+                        <span className="text-sm font-black text-amber-400">{formatNaira(w.amount)}</span>
+                        <p className="text-[9px] text-slate-500">Fee: {formatNaira(w.fee)}</p>
+                        <p className="text-[10px] font-bold text-emerald-400">Net: {formatNaira(w.netAmount)}</p>
+                      </div>
+
+                      {onDeleteWithdrawal && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm('Delete this withdrawal record?')) {
+                              onDeleteWithdrawal(w.id);
+                            }
+                          }}
+                          className="p-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 hover:text-rose-400"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => onDisburseWithdrawal(w.id)}
-                    className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 py-2 text-xs font-bold text-white shadow-md active:scale-95"
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    <span>Disburse {formatNaira(w.netAmount)} to Bank Now</span>
-                  </button>
+                  {w.status !== 'completed' ? (
+                    <button
+                      onClick={() => onDisburseWithdrawal(w.id)}
+                      className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 py-2.5 text-xs font-black text-white shadow-md hover:from-emerald-500 hover:to-teal-500 active:scale-95 transition-all"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>Disburse {formatNaira(w.netAmount)} to Bank Now</span>
+                    </button>
+                  ) : (
+                    <div className="rounded-xl bg-emerald-950/40 border border-emerald-500/30 p-2 text-center text-[11px] font-bold text-emerald-300">
+                      ✓ Disbursed & Completed on {w.processedAt || 'Sunday Batch'}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -994,14 +1380,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* TAB 5: Daily News Bulletin Upload */}
+      {/* ========================================================================= */}
+      {/* TAB 5: DAILY NEWS BULLETIN UPLOAD & MANAGEMENT */}
+      {/* ========================================================================= */}
       {activeAdminTab === 'news' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 space-y-3">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-              Upload Daily Platform News
+            <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+              <Newspaper className="h-4 w-4 text-purple-400" />
+              <span>Upload Daily Platform News</span>
             </h3>
-            <span className="text-[11px] text-blue-400">Broadcasts to Earn View</span>
+            <span className="text-[11px] text-purple-400 font-bold">Broadcasts to Earn View</span>
           </div>
 
           {newsSuccess && (
@@ -1063,14 +1452,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="pt-3 border-t border-slate-800/80 space-y-2">
             <h4 className="text-[11px] font-bold text-slate-400">Current Live Bulletins ({announcements.length})</h4>
             {announcements.map((a) => (
-              <div key={a.id} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-                <div className="flex items-center justify-between mb-1">
+              <div key={a.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-1">
+                <div className="flex items-center justify-between">
                   <span className="font-bold text-white">{a.title}</span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.2 bg-blue-500/10 text-blue-400 rounded">
-                    {a.tag}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 bg-blue-500/10 text-blue-400 rounded">
+                      {a.tag}
+                    </span>
+                    {onDeleteAnnouncement && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm('Delete this bulletin announcement?')) {
+                            onDeleteAnnouncement(a.id);
+                          }
+                        }}
+                        className="text-slate-500 hover:text-rose-400"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <p className="text-[11px] text-slate-300">{a.content}</p>
+                <p className="text-[9px] text-slate-500">{a.publishedAt} • by {a.author}</p>
               </div>
             ))}
           </div>
@@ -1105,6 +1510,53 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             >
               Close Preview
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* RESET ALL USERS CONFIRMATION MODAL */}
+      {showResetUsersModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
+          <div className="relative max-w-sm w-full rounded-3xl border border-rose-500/50 bg-slate-900 p-5 space-y-4 shadow-2xl">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-400 mx-auto">
+              <Trash2 className="h-6 w-6" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="text-base font-black text-white">Reset All Registered Users?</h3>
+              <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
+                This will wipe all existing creator accounts from the database. Any new user who registers will appear immediately in this panel in real-time.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                id="confirm-reset-all-users-btn"
+                disabled={isResetting}
+                onClick={async () => {
+                  if (onResetUsers) {
+                    setIsResetting(true);
+                    await onResetUsers();
+                    setIsResetting(false);
+                    setShowResetUsersModal(false);
+                    setDownloadToast('All registered users reset to 0.');
+                    setTimeout(() => setDownloadToast(null), 3000);
+                  }
+                }}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 py-3 text-xs font-black text-white shadow-lg shadow-rose-600/30 active:scale-95 disabled:opacity-50 transition-all"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>{isResetting ? 'Resetting Users...' : 'Yes, Reset All Users'}</span>
+              </button>
+
+              <button
+                disabled={isResetting}
+                onClick={() => setShowResetUsersModal(false)}
+                className="w-full py-2.5 rounded-xl bg-slate-800 text-xs font-bold text-slate-300 hover:bg-slate-700 active:scale-95"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

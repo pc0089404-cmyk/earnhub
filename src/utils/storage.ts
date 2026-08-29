@@ -888,6 +888,48 @@ export async function apiAddAnnouncement(announcement: NewsBulletin): Promise<bo
   }
 }
 
+export async function apiDeleteAnnouncement(announcementId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/announcements/${announcementId}`, { method: 'DELETE' });
+    const { data } = await parseJsonResponse<{ success: boolean; allAnnouncements?: NewsBulletin[] }>(res);
+    if (data && data.success && Array.isArray(data.allAnnouncements)) {
+      saveAnnouncements(data.allAnnouncements);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiDeleteVIPPurchase(purchaseId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/vip/purchase/${purchaseId}`, { method: 'DELETE' });
+    const { data } = await parseJsonResponse<{ success: boolean; allVIPPurchases?: VIPPurchaseRequest[] }>(res);
+    if (data && data.success && Array.isArray(data.allVIPPurchases)) {
+      saveVIPPurchases(data.allVIPPurchases);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiDeleteWithdrawal(withdrawalId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/withdrawals/${withdrawalId}`, { method: 'DELETE' });
+    const { data } = await parseJsonResponse<{ success: boolean; allWithdrawals?: WithdrawalRequest[] }>(res);
+    if (data && data.success && Array.isArray(data.allWithdrawals)) {
+      saveWithdrawals(data.allWithdrawals);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export async function apiMarkMessagesRead(userId: string): Promise<boolean> {
   try {
     const res = await fetch('/api/messages/mark-read', {
@@ -898,6 +940,44 @@ export async function apiMarkMessagesRead(userId: string): Promise<boolean> {
     const { data } = await parseJsonResponse<{ success: boolean; messages?: UserMessage[] }>(res);
     if (data && data.success && Array.isArray(data.messages)) {
       localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiResetAllUsers(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/admin/reset-users', { method: 'POST' });
+    const { data } = await parseJsonResponse<{ success: boolean; allUsers?: User[] }>(res);
+    if (data && data.success) {
+      saveUsers([]);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiResetAllData(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/admin/reset-all', { method: 'POST' });
+    const { data } = await parseJsonResponse<{
+      success: boolean;
+      allUsers?: User[];
+      allSubmissions?: VideoSubmission[];
+      allWithdrawals?: WithdrawalRequest[];
+      allVIPPurchases?: VIPPurchaseRequest[];
+    }>(res);
+    if (data && data.success) {
+      saveUsers([]);
+      saveSubmissions([]);
+      saveWithdrawals([]);
+      saveVIPPurchases([]);
+      localStorage.setItem(MESSAGES_KEY, JSON.stringify([]));
       return true;
     }
     return false;

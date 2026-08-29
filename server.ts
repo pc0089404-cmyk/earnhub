@@ -589,6 +589,42 @@ app.post('/api/announcements', (req, res) => {
   }
 });
 
+// 16b. Announcements (Delete)
+app.delete('/api/announcements/:id', (req, res) => {
+  try {
+    const aId = req.params.id;
+    db.announcements = db.announcements.filter((a) => a.id !== aId);
+    saveDatabase(db);
+    return res.json({ success: true, allAnnouncements: db.announcements });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Server error' });
+  }
+});
+
+// 16c. VIP Purchase (Delete)
+app.delete('/api/vip/purchase/:id', (req, res) => {
+  try {
+    const pId = req.params.id;
+    db.vipPurchases = db.vipPurchases.filter((p) => p.id !== pId);
+    saveDatabase(db);
+    return res.json({ success: true, allVIPPurchases: db.vipPurchases });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Server error' });
+  }
+});
+
+// 16d. Withdrawals (Delete)
+app.delete('/api/withdrawals/:id', (req, res) => {
+  try {
+    const wId = req.params.id;
+    db.withdrawals = db.withdrawals.filter((w) => w.id !== wId);
+    saveDatabase(db);
+    return res.json({ success: true, allWithdrawals: db.withdrawals });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Server error' });
+  }
+});
+
 // 17. Messages (Mark read)
 app.post('/api/messages/mark-read', (req, res) => {
   try {
@@ -601,6 +637,41 @@ app.post('/api/messages/mark-read', (req, res) => {
     });
     saveDatabase(db);
     return res.json({ success: true, messages: db.messages });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Server error' });
+  }
+});
+
+// 17b. Admin Reset All Users Endpoint
+app.post('/api/admin/reset-users', (req, res) => {
+  try {
+    db.users = [];
+    saveDatabase(db);
+    console.log('[API] Admin reset all registered users.');
+    return res.json({ success: true, allUsers: [] });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Server error' });
+  }
+});
+
+// 17c. Admin Reset All Data (Users, Submissions, Withdrawals, VIP Buys, Messages)
+app.post('/api/admin/reset-all', (req, res) => {
+  try {
+    db.users = [];
+    db.submissions = [];
+    db.withdrawals = [];
+    db.vipPurchases = [];
+    db.messages = [];
+    saveDatabase(db);
+    console.log('[API] Admin reset all platform data.');
+    return res.json({
+      success: true,
+      allUsers: [],
+      allSubmissions: [],
+      allWithdrawals: [],
+      allVIPPurchases: [],
+      messages: [],
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message || 'Server error' });
   }

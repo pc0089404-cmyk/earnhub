@@ -42,6 +42,7 @@ import {
   giftUserReward,
   deleteUser,
   getVIPPurchases,
+  saveVIPPurchases,
   addVIPPurchase,
   approveVIPPurchase,
   rejectVIPPurchase,
@@ -59,7 +60,12 @@ import {
   apiSubmitVIPPurchase,
   apiReviewVIPPurchase,
   apiAddAnnouncement,
+  apiDeleteAnnouncement,
+  apiDeleteVIPPurchase,
+  apiDeleteWithdrawal,
   apiMarkMessagesRead,
+  apiResetAllUsers,
+  apiResetAllData,
 } from './utils/storage';
 
 export default function App() {
@@ -79,6 +85,28 @@ export default function App() {
 
   const userRef = useRef<User | null>(null);
   userRef.current = user;
+
+  // Function to poll the server for real-time changes across devices
+  const syncWithServer = async () => {
+    const serverState = await apiFetchServerState();
+    if (serverState) {
+      setUsersList(serverState.users || []);
+      setSubmissionsList(serverState.submissions || []);
+      setWithdrawalsList(serverState.withdrawals || []);
+      setAnnouncementsList(serverState.announcements || []);
+      setVIPPurchasesList(serverState.vipPurchases || []);
+
+      const currentUser = userRef.current;
+      if (currentUser) {
+        const freshUser = (serverState.users || []).find((u) => u.id === currentUser.id);
+        if (freshUser) {
+          setUser(freshUser);
+          setCurrentUser(freshUser);
+        }
+        setUserMessages(getMessages(currentUser.id));
+      }
+    }
+  };
 
   // Initialize and load server state + sync interval
   useEffect(() => {
@@ -102,33 +130,11 @@ export default function App() {
       setUserMessages(getMessages(fresh.id));
     }
 
-    // Function to poll the server for real-time changes across devices
-    const syncWithServer = async () => {
-      const serverState = await apiFetchServerState();
-      if (serverState) {
-        setUsersList(serverState.users || []);
-        setSubmissionsList(serverState.submissions || []);
-        setWithdrawalsList(serverState.withdrawals || []);
-        setAnnouncementsList(serverState.announcements || []);
-        setVIPPurchasesList(serverState.vipPurchases || []);
-
-        const currentUser = userRef.current;
-        if (currentUser) {
-          const freshUser = (serverState.users || []).find((u) => u.id === currentUser.id);
-          if (freshUser) {
-            setUser(freshUser);
-            setCurrentUser(freshUser);
-          }
-          setUserMessages(getMessages(currentUser.id));
-        }
-      }
-    };
-
     // Immediate initial sync
     syncWithServer();
 
-    // Auto-poll every 2.5 seconds to synchronize users signed up on other phones
-    const interval = setInterval(syncWithServer, 2500);
+    // Auto-poll every 1.2 seconds so any newly registered users or uploaded videos show up almost instantly
+    const interval = setInterval(syncWithServer, 1200);
     return () => clearInterval(interval);
   }, []);
 
@@ -145,15 +151,13 @@ export default function App() {
   }, [usersList]);
 
   // Handle Login / Sign Up
-  const handleAuthSuccess = (authenticatedUser: User) => {
+  const handleAuthSuccess = async (authenticatedUser: User) => {
     setUser(authenticatedUser);
     setCurrentUser(authenticatedUser);
     setUsersList(getUsers());
     setUserMessages(getMessages(authenticatedUser.id));
     setActiveTab('dashboard');
-    apiFetchServerState().then((state) => {
-      if (state) setUsersList(state.users);
-    });
+    await syncWithServer();
   };
 
   // Handle Sign Out
@@ -175,11 +179,10 @@ export default function App() {
   };
 
   // Handle Video Upload Task Submission
-  const handleUploadComplete = (newSub: VideoSubmission) => {
+  const handleUploadComplete = async (newSub: VideoSubmission) => {
     const updated = [newSub, ...submissionsList];
     setSubmissionsList(updated);
     saveSubmissions(updated);
-    apiSubmitVideoTask(newSub);
 
     // Increment user's total uploaded video count immediately
     if (user) {
@@ -207,6 +210,10 @@ export default function App() {
       });
       setUserMessages(getMessages(user.id));
     }
+
+    // Instantly post to server and sync
+    await apiSubmitVideoTask(newSub);
+    await syncWithServer();
   };
 
   // Handle Withdrawal Request Submission
@@ -300,6 +307,7 @@ export default function App() {
         setUserMessages(getMessages(user.id));
       }
     }
+    apiReviewVIPPurchase(purchaseId, 'approved');
   };
 
   // Admin VIP Rejection
@@ -311,6 +319,7 @@ export default function App() {
         setUserMessages(getMessages(user.id));
       }
     }
+    apiReviewVIPPurchase(purchaseId, 'rejected', 'Payment proof verification failed');
   };
 
   // Admin Submission Approval
@@ -476,12 +485,65 @@ export default function App() {
         setUserMessages(getMessages(user.id));
       }
     }
+    apiGiftUserReward(userId, amount, note);
   };
 
   // Delete User Handler
   const handleDeleteUser = (userId: string) => {
     deleteUser(userId);
     setUsersList(getUsers());
+    apiDeleteUser(userId);
+  };
+
+  // Delete Announcement Handler
+  const handleDeleteAnnouncement = (bulletinId: string) => {
+    const updated = announcementsList.filter((a) => a.id !== bulletinId);
+    setAnnouncementsList(updated);
+    saveAnnouncements(updated);
+    apiDeleteAnnouncement(bulletinId);
+  };
+
+  // Delete VIP Purchase Handler
+  const handleDeleteVIPPurchase = (purchaseId: string) => {
+    const updated = vipPurchasesList.filter((v) => v.id !== purchaseId);
+    setVIPPurchasesList(updated);
+    saveVIPPurchases(updated);
+    apiDeleteVIPPurchase(purchaseId);
+  };
+
+  // Delete Withdrawal Handler
+  const handleDeleteWithdrawal = (withdrawalId: string) => {
+    const updated = withdrawalsList.filter((w) => w.id !== withdrawalId);
+    setWithdrawalsList(updated);
+    saveWithdrawals(updated);
+    apiDeleteWithdrawal(withdrawalId);
+  };
+
+  // Manual Refresh Server State Handler
+  const handleRefreshServerState = async () => {
+    await syncWithServer();
+  };
+
+  // Reset All Users Handler
+  const handleResetAllUsers = async () => {
+    saveUsers([]);
+    setUsersList([]);
+    await apiResetAllUsers();
+    await syncWithServer();
+  };
+
+  // Reset All Data Handler
+  const handleResetAllData = async () => {
+    saveUsers([]);
+    saveSubmissions([]);
+    saveWithdrawals([]);
+    saveVIPPurchases([]);
+    setUsersList([]);
+    setSubmissionsList([]);
+    setWithdrawalsList([]);
+    setVIPPurchasesList([]);
+    await apiResetAllData();
+    await syncWithServer();
   };
 
   // Mark all user notifications as read
@@ -614,21 +676,39 @@ export default function App() {
                     onGiftReward={handleGiftReward}
                     onDeleteUser={handleDeleteUser}
                     onDeleteSubmission={handleDeleteSubmission}
+                    onDeleteAnnouncement={handleDeleteAnnouncement}
+                    onDeleteVIPPurchase={handleDeleteVIPPurchase}
+                    onDeleteWithdrawal={handleDeleteWithdrawal}
+                    onResetUsers={handleResetAllUsers}
+                    onResetAllData={handleResetAllData}
+                    onRefreshState={handleRefreshServerState}
                     onNavigate={(tab) => setActiveTab(tab)}
                   />
                 ) : (
-                  <div className="rounded-3xl border border-rose-500/40 bg-slate-900/90 p-6 text-center space-y-3">
-                    <div className="text-3xl">🚫</div>
-                    <h3 className="text-base font-bold text-white">Access Restricted</h3>
-                    <p className="text-xs text-slate-300">
-                      You do not have authorization to view this area. Only verified administrator accounts can access this panel.
-                    </p>
-                    <button
-                      onClick={() => setActiveTab('dashboard')}
-                      className="rounded-xl bg-slate-800 px-4 py-2 text-xs font-bold text-white hover:bg-slate-700"
-                    >
-                      Return to Home
-                    </button>
+                  <div className="rounded-3xl border border-amber-500/40 bg-slate-900/90 p-6 text-center space-y-4 max-w-sm mx-auto my-8 shadow-2xl">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 mx-auto">
+                      <span className="text-2xl">🔐</span>
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-white">Administrator Access Required</h3>
+                      <p className="text-xs text-slate-300 mt-1">
+                        Please enter the administrator master security PIN (0913) to unlock the Admin Management Panel.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <button
+                        onClick={() => setIsAdminPinOpen(true)}
+                        className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 py-3 text-xs font-black text-slate-950 shadow-lg shadow-amber-500/20 active:scale-95 transition-all"
+                      >
+                        <span>Enter Security PIN (0913)</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('dashboard')}
+                        className="rounded-xl bg-slate-800 px-4 py-2.5 text-xs font-bold text-slate-300 hover:bg-slate-700"
+                      >
+                        Return to Home
+                      </button>
+                    </div>
                   </div>
                 )
               )}

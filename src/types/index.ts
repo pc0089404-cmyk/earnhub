@@ -74,6 +74,7 @@ export interface WithdrawalRequest {
   status: 'queued_sunday' | 'processing' | 'completed' | 'failed';
   requestedAt: string;
   scheduledDisbursement: string;
+  processedAt?: string;
 }
 
 export interface LeaderboardCreator {
