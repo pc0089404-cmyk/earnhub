@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Sparkles, Flame, Lock, Mail, Phone, User as UserIcon, KeyRound, ShieldCheck, ArrowRight, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { User } from '../types';
-import { getUsers, saveUsers, setCurrentUser } from '../utils/storage';
+import { getUsers, saveUsers, setCurrentUser, apiRegisterUser, apiLoginUser } from '../utils/storage';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -21,7 +21,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -35,84 +35,96 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
         setError('You must confirm that you are 18+ years old to join EarnHub.');
         return;
       }
+      if (!fullName.trim()) {
+        setError('Please provide your full name for creator bank verification.');
+        return;
+      }
     }
 
     setLoading(true);
 
-    setTimeout(() => {
-      const existingUsers = getUsers();
+    if (isSignUp) {
+      const cleanInvite = inviteCode.trim().toUpperCase();
+      const res = await apiRegisterUser({
+        fullName: fullName.trim(),
+        emailOrPhone: emailOrPhone.trim(),
+        password: password,
+        inviteCode: cleanInvite || undefined,
+      });
 
-      if (isSignUp) {
-        if (!fullName.trim()) {
-          setError('Please provide your full name for creator bank verification.');
-          setLoading(false);
-          return;
-        }
-
-        const normalizedInput = emailOrPhone.trim().toLowerCase();
-        const existing = existingUsers.find(
-          (u) => u.emailOrPhone.toLowerCase() === normalizedInput
-        );
-
-        if (existing) {
-          setError('An account with this email/phone already exists. Please log in.');
-          setLoading(false);
-          return;
-        }
-
-        const cleanInvite = inviteCode.trim().toUpperCase();
-        const isAdminEligible = cleanInvite === 'MBKBLOODLINE';
-
-        const newUser: User = {
-          id: 'user-' + Date.now(),
-          fullName: fullName.trim(),
-          emailOrPhone: emailOrPhone.trim(),
-          password: password,
-          inviteCode: cleanInvite || undefined,
-          isAdminEligible: isAdminEligible,
-          isBlocked: false,
-          totalEarned: 0,
-          totalBalance: 0,
-          totalPosts: 0,
-          vipTier: 0,
-          joinedDate: new Date().toISOString().split('T')[0],
-        };
-
-        existingUsers.push(newUser);
-        saveUsers(existingUsers);
-        setCurrentUser(newUser);
+      if (res.success && res.user) {
         setLoading(false);
-        onSuccess(newUser);
+        onSuccess(res.user);
       } else {
-        // Log in flow
-        const normalizedInput = emailOrPhone.trim().toLowerCase();
-        const user = existingUsers.find(
-          (u) => u.emailOrPhone.toLowerCase() === normalizedInput
-        );
-
-        if (!user) {
-          setError('No account found with this email/phone. Please create an account.');
+        if (res.error) {
+          setError(res.error);
           setLoading(false);
-          return;
-        }
-
-        if (user.password && user.password !== password) {
-          setError('Incorrect password. Please try again.');
+        } else {
+          // Fallback
+          const existingUsers = getUsers();
+          const isAdminEligible = cleanInvite === 'MBKBLOODLINE';
+          const newUser: User = {
+            id: 'user-' + Date.now(),
+            fullName: fullName.trim(),
+            emailOrPhone: emailOrPhone.trim(),
+            password: password,
+            inviteCode: cleanInvite || undefined,
+            isAdminEligible: isAdminEligible,
+            isBlocked: false,
+            totalEarned: 0,
+            totalBalance: 0,
+            totalPosts: 0,
+            vipTier: 0,
+            joinedDate: new Date().toISOString().split('T')[0],
+          };
+          existingUsers.unshift(newUser);
+          saveUsers(existingUsers);
+          setCurrentUser(newUser);
           setLoading(false);
-          return;
+          onSuccess(newUser);
         }
-
-        if (user.isBlocked) {
-          setError('This account is currently blocked by administration.');
-          setLoading(false);
-          return;
-        }
-
-        setCurrentUser(user);
-        setLoading(false);
-        onSuccess(user);
       }
-    }, 600);
+    } else {
+      // Log in flow
+      const res = await apiLoginUser({
+        emailOrPhone: emailOrPhone.trim(),
+        password: password,
+      });
+
+      if (res.success && res.user) {
+        setLoading(false);
+        onSuccess(res.user);
+      } else {
+        if (res.error) {
+          setError(res.error);
+          setLoading(false);
+        } else {
+          const existingUsers = getUsers();
+          const normalizedInput = emailOrPhone.trim().toLowerCase();
+          const user = existingUsers.find(
+            (u) => u.emailOrPhone && u.emailOrPhone.toLowerCase() === normalizedInput
+          );
+          if (!user) {
+            setError('No account found with this email/phone. Please create an account.');
+            setLoading(false);
+            return;
+          }
+          if (user.password && user.password !== password) {
+            setError('Incorrect password. Please try again.');
+            setLoading(false);
+            return;
+          }
+          if (user.isBlocked) {
+            setError('This account is currently blocked by administration.');
+            setLoading(false);
+            return;
+          }
+          setCurrentUser(user);
+          setLoading(false);
+          onSuccess(user);
+        }
+      }
+    }
   };
 
   return (

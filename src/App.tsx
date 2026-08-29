@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { NavigationDrawer } from './components/NavigationDrawer';
 import { Dashboard } from './components/Dashboard';
@@ -46,6 +46,20 @@ import {
   approveVIPPurchase,
   rejectVIPPurchase,
   VIP_TIERS,
+  apiFetchServerState,
+  apiUpdateUser,
+  apiDeleteUser,
+  apiToggleBlockUser,
+  apiGiftUserReward,
+  apiSubmitVideoTask,
+  apiReviewVideoTask,
+  apiDeleteSubmission,
+  apiSubmitWithdrawal,
+  apiDisburseWithdrawal,
+  apiSubmitVIPPurchase,
+  apiReviewVIPPurchase,
+  apiAddAnnouncement,
+  apiMarkMessagesRead,
 } from './utils/storage';
 
 export default function App() {
@@ -63,7 +77,10 @@ export default function App() {
   const [vipPurchasesList, setVIPPurchasesList] = useState<VIPPurchaseRequest[]>([]);
   const [userMessages, setUserMessages] = useState<UserMessage[]>([]);
 
-  // Initialize
+  const userRef = useRef<User | null>(null);
+  userRef.current = user;
+
+  // Initialize and load server state + sync interval
   useEffect(() => {
     initLocalStorage();
     const storedUser = getCurrentUser();
@@ -80,18 +97,46 @@ export default function App() {
     setVIPPurchasesList(storedVip);
 
     if (storedUser) {
-      // Find freshest copy of user
       const fresh = storedUsers.find((u) => u.id === storedUser.id) || storedUser;
       setUser(fresh);
       setUserMessages(getMessages(fresh.id));
     }
+
+    // Function to poll the server for real-time changes across devices
+    const syncWithServer = async () => {
+      const serverState = await apiFetchServerState();
+      if (serverState) {
+        setUsersList(serverState.users || []);
+        setSubmissionsList(serverState.submissions || []);
+        setWithdrawalsList(serverState.withdrawals || []);
+        setAnnouncementsList(serverState.announcements || []);
+        setVIPPurchasesList(serverState.vipPurchases || []);
+
+        const currentUser = userRef.current;
+        if (currentUser) {
+          const freshUser = (serverState.users || []).find((u) => u.id === currentUser.id);
+          if (freshUser) {
+            setUser(freshUser);
+            setCurrentUser(freshUser);
+          }
+          setUserMessages(getMessages(currentUser.id));
+        }
+      }
+    };
+
+    // Immediate initial sync
+    syncWithServer();
+
+    // Auto-poll every 2.5 seconds to synchronize users signed up on other phones
+    const interval = setInterval(syncWithServer, 2500);
+    return () => clearInterval(interval);
   }, []);
 
   // Sync current user state if usersList updates
   useEffect(() => {
     if (user) {
       const fresh = usersList.find((u) => u.id === user.id);
-      if (fresh && JSON.stringify(fresh) !== JSON.stringify(user)) {
+      if (fresh && (fresh.totalBalance !== user.totalBalance || fresh.totalEarned !== user.totalEarned || fresh.vipTier !== user.vipTier || fresh.isBlocked !== user.isBlocked)) {
         setUser(fresh);
         setCurrentUser(fresh);
       }
@@ -106,6 +151,9 @@ export default function App() {
     setUsersList(getUsers());
     setUserMessages(getMessages(authenticatedUser.id));
     setActiveTab('dashboard');
+    apiFetchServerState().then((state) => {
+      if (state) setUsersList(state.users);
+    });
   };
 
   // Handle Sign Out
@@ -123,6 +171,7 @@ export default function App() {
     const all = getUsers().map((u) => (u.id === updated.id ? updated : u));
     saveUsers(all);
     setUsersList(all);
+    apiUpdateUser(updated);
   };
 
   // Handle Video Upload Task Submission
@@ -130,6 +179,7 @@ export default function App() {
     const updated = [newSub, ...submissionsList];
     setSubmissionsList(updated);
     saveSubmissions(updated);
+    apiSubmitVideoTask(newSub);
 
     // Increment user's total uploaded video count immediately
     if (user) {
@@ -164,6 +214,7 @@ export default function App() {
     const updatedList = [newWd, ...withdrawalsList];
     setWithdrawalsList(updatedList);
     saveWithdrawals(updatedList);
+    apiSubmitWithdrawal(newWd, updatedBalance);
 
     if (user) {
       const updatedUser = { ...user, totalBalance: updatedBalance };
@@ -204,6 +255,7 @@ export default function App() {
     };
     addVIPPurchase(newReq);
     setVIPPurchasesList(getVIPPurchases());
+    apiSubmitVIPPurchase(newReq);
 
     addMessage({
       id: 'msg-vip-sub-' + Date.now(),
@@ -228,6 +280,7 @@ export default function App() {
       setUsersList(all);
       setUser({ ...all[idx] });
       setCurrentUser({ ...all[idx] });
+      apiUpdateUser(all[idx]);
     }
   };
 
@@ -293,6 +346,9 @@ export default function App() {
       }
     }
 
+    // Call server API for persistence across devices
+    apiReviewVideoTask(subId, 'approved', rewardAmount);
+
     // Add notification
     addMessage({
       id: 'msg-' + Date.now(),
@@ -328,6 +384,9 @@ export default function App() {
     setSubmissionsList(updatedSubs);
     saveSubmissions(updatedSubs);
 
+    // Call server API for persistence across devices
+    apiReviewVideoTask(subId, 'rejected', 0, declineReason);
+
     // Add rejection notification with exact required copy
     addMessage({
       id: 'msg-' + Date.now(),
@@ -348,6 +407,7 @@ export default function App() {
     const updatedSubs = submissionsList.filter((s) => s.id !== subId);
     setSubmissionsList(updatedSubs);
     saveSubmissions(updatedSubs);
+    apiDeleteSubmission(subId);
   };
 
   const handleToggleBlockUser = (targetUserId: string) => {
@@ -362,6 +422,7 @@ export default function App() {
         setUser({ ...all[idx] });
         setCurrentUser({ ...all[idx] });
       }
+      apiToggleBlockUser(targetUserId);
     }
   };
 
@@ -369,6 +430,7 @@ export default function App() {
     const updatedAnn = [news, ...announcementsList];
     setAnnouncementsList(updatedAnn);
     saveAnnouncements(updatedAnn);
+    apiAddAnnouncement(news);
   };
 
   const handleDisburseWithdrawal = (wId: string) => {
@@ -382,6 +444,7 @@ export default function App() {
     };
     setWithdrawalsList(updatedWds);
     saveWithdrawals(updatedWds);
+    apiDisburseWithdrawal(wId);
 
     // Send payout confirmation
     addMessage({

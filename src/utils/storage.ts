@@ -453,6 +453,345 @@ export function initLocalStorage(): void {
   }
 }
 
+// -------------------------------------------------------------
+// SERVER API SYNC & CROSS-DEVICE PERSISTENCE
+// -------------------------------------------------------------
+
+export interface ServerStateResponse {
+  success: boolean;
+  users: User[];
+  submissions: VideoSubmission[];
+  withdrawals: WithdrawalRequest[];
+  announcements: NewsBulletin[];
+  messages: UserMessage[];
+  vipPurchases: VIPPurchaseRequest[];
+}
+
+export async function apiFetchServerState(): Promise<ServerStateResponse | null> {
+  try {
+    const res = await fetch('/api/state');
+    if (!res.ok) return null;
+    const data: ServerStateResponse = await res.json();
+    if (data.success) {
+      if (Array.isArray(data.users)) saveUsers(data.users);
+      if (Array.isArray(data.submissions)) saveSubmissions(data.submissions);
+      if (Array.isArray(data.withdrawals)) saveWithdrawals(data.withdrawals);
+      if (Array.isArray(data.announcements)) saveAnnouncements(data.announcements);
+      if (Array.isArray(data.vipPurchases)) saveVIPPurchases(data.vipPurchases);
+      if (Array.isArray(data.messages)) {
+        localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
+      }
+      return data;
+    }
+    return null;
+  } catch (err) {
+    // Return null if offline or initial load
+    return null;
+  }
+}
+
+export async function apiRegisterUser(params: {
+  fullName: string;
+  emailOrPhone: string;
+  password?: string;
+  inviteCode?: string;
+}): Promise<{ success: boolean; user?: User; error?: string; allUsers?: User[] }> {
+  try {
+    const res = await fetch('/api/users/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json();
+    if (data.success && data.user) {
+      if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
+      setCurrentUser(data.user);
+      return { success: true, user: data.user, allUsers: data.allUsers };
+    }
+    return { success: false, error: data.error || 'Failed to register account' };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network connection failed' };
+  }
+}
+
+export async function apiLoginUser(params: {
+  emailOrPhone: string;
+  password?: string;
+}): Promise<{ success: boolean; user?: User; error?: string; allUsers?: User[] }> {
+  try {
+    const res = await fetch('/api/users/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json();
+    if (data.success && data.user) {
+      if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
+      setCurrentUser(data.user);
+      return { success: true, user: data.user, allUsers: data.allUsers };
+    }
+    return { success: false, error: data.error || 'Invalid credentials' };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network connection failed' };
+  }
+}
+
+export async function apiUpdateUser(user: User): Promise<boolean> {
+  try {
+    const res = await fetch('/api/users/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user }),
+    });
+    const data = await res.json();
+    if (data.success && Array.isArray(data.allUsers)) {
+      saveUsers(data.allUsers);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiDeleteUser(userId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/users/${userId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success && Array.isArray(data.allUsers)) {
+      saveUsers(data.allUsers);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiToggleBlockUser(userId: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/users/toggle-block', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+    const data = await res.json();
+    if (data.success && Array.isArray(data.allUsers)) {
+      saveUsers(data.allUsers);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiGiftUserReward(userId: string, amount: number, note?: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/users/gift', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, amount, note }),
+    });
+    const data = await res.json();
+    if (data.success && Array.isArray(data.allUsers)) {
+      saveUsers(data.allUsers);
+      if (Array.isArray(data.messages)) {
+        localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
+      }
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiSubmitVideoTask(submission: VideoSubmission): Promise<boolean> {
+  try {
+    const res = await fetch('/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ submission }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (Array.isArray(data.allSubmissions)) saveSubmissions(data.allSubmissions);
+      if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
+      if (Array.isArray(data.messages)) {
+        localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
+      }
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiReviewVideoTask(
+  subId: string,
+  status: 'approved' | 'rejected',
+  rewardAmount?: number,
+  declineReason?: string
+): Promise<boolean> {
+  try {
+    const res = await fetch('/api/submissions/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subId, status, rewardAmount, declineReason }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (Array.isArray(data.allSubmissions)) saveSubmissions(data.allSubmissions);
+      if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
+      if (Array.isArray(data.messages)) {
+        localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
+      }
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiDeleteSubmission(subId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/submissions/${subId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success && Array.isArray(data.allSubmissions)) {
+      saveSubmissions(data.allSubmissions);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiSubmitWithdrawal(withdrawal: WithdrawalRequest, updatedBalance?: number): Promise<boolean> {
+  try {
+    const res = await fetch('/api/withdrawals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ withdrawal, updatedBalance }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (Array.isArray(data.allWithdrawals)) saveWithdrawals(data.allWithdrawals);
+      if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
+      if (Array.isArray(data.messages)) {
+        localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
+      }
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiDisburseWithdrawal(withdrawalId: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/withdrawals/disburse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ withdrawalId }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (Array.isArray(data.allWithdrawals)) saveWithdrawals(data.allWithdrawals);
+      if (Array.isArray(data.messages)) {
+        localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
+      }
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiSubmitVIPPurchase(purchase: VIPPurchaseRequest): Promise<boolean> {
+  try {
+    const res = await fetch('/api/vip/purchase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ purchase }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (Array.isArray(data.allVIPPurchases)) saveVIPPurchases(data.allVIPPurchases);
+      if (Array.isArray(data.messages)) {
+        localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
+      }
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiReviewVIPPurchase(purchaseId: string, status: 'approved' | 'rejected', reason?: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/vip/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ purchaseId, status, reason }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (Array.isArray(data.allVIPPurchases)) saveVIPPurchases(data.allVIPPurchases);
+      if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
+      if (Array.isArray(data.messages)) {
+        localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
+      }
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiAddAnnouncement(announcement: NewsBulletin): Promise<boolean> {
+  try {
+    const res = await fetch('/api/announcements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ announcement }),
+    });
+    const data = await res.json();
+    if (data.success && Array.isArray(data.allAnnouncements)) {
+      saveAnnouncements(data.allAnnouncements);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export async function apiMarkMessagesRead(userId: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/messages/mark-read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+    const data = await res.json();
+    if (data.success && Array.isArray(data.messages)) {
+      localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // Storage Accessors
 export function getUsers(): User[] {
   try {
@@ -469,6 +808,7 @@ export function saveUsers(users: User[]): void {
 export function deleteUser(userId: string): void {
   const users = getUsers().filter((u) => u.id !== userId);
   saveUsers(users);
+  apiDeleteUser(userId);
   const current = getCurrentUser();
   if (current?.id === userId) {
     setCurrentUser(null);
@@ -502,6 +842,9 @@ export function giftUserReward(userId: string, amount: number, note?: string): {
     amount: amount,
   });
 
+  // Also sync to server
+  apiGiftUserReward(userId, amount, note);
+
   return { success: true, user: users[idx] };
 }
 
@@ -523,7 +866,7 @@ export function setCurrentUser(user: User | null): void {
     if (idx >= 0) {
       users[idx] = user;
     } else {
-      users.push(user);
+      users.unshift(user);
     }
     saveUsers(users);
   } else {
@@ -596,6 +939,7 @@ export function markMessagesRead(userId: string): void {
       return m;
     });
     localStorage.setItem(MESSAGES_KEY, JSON.stringify(updated));
+    apiMarkMessagesRead(userId);
   } catch (err) {
     console.error('Failed to mark read', err);
   }
@@ -617,6 +961,7 @@ export function addVIPPurchase(req: VIPPurchaseRequest): void {
   const reqs = getVIPPurchases();
   reqs.unshift(req);
   saveVIPPurchases(reqs);
+  apiSubmitVIPPurchase(req);
 }
 
 export function approveVIPPurchase(id: string): { success: boolean; user?: User; req?: VIPPurchaseRequest } {
@@ -654,6 +999,8 @@ export function approveVIPPurchase(id: string): { success: boolean; user?: User;
     type: 'vip',
   });
 
+  apiReviewVIPPurchase(id, 'approved');
+
   return { success: true, user: updatedUser, req };
 }
 
@@ -678,6 +1025,8 @@ export function rejectVIPPurchase(id: string, reason?: string): { success: boole
     read: false,
     type: 'rejection',
   });
+
+  apiReviewVIPPurchase(id, 'rejected', req.rejectionReason);
 
   return { success: true, req };
 }
