@@ -1,0 +1,117 @@
+{
+  "users": [
+    {
+      "id": "user-1788041102999-3118h",
+      "fullName": "Sunday Okon",
+      "emailOrPhone": "sunday@gmail.com",
+      "password": "password123",
+      "isAdminEligible": false,
+      "isBlocked": false,
+      "totalEarned": 0,
+      "totalBalance": 0,
+      "totalPosts": 0,
+      "vipTier": 0,
+      "joinedDate": "2026-08-29"
+    },
+    {
+      "id": "user-1788041036206-ims0v",
+      "fullName": "test user",
+      "emailOrPhone": "test@example.com",
+      "password": "password123",
+      "isAdminEligible": false,
+      "isBlocked": false,
+      "totalEarned": 0,
+      "totalBalance": 0,
+      "totalPosts": 0,
+      "vipTier": 0,
+      "joinedDate": "2026-08-29"
+    },
+    {
+      "id": "user-1788040510472-555al",
+      "fullName": "precious",
+      "emailOrPhone": "07130619144",
+      "password": "precious",
+      "inviteCode": "MBKBLOODLINE",
+      "isAdminEligible": true,
+      "isBlocked": false,
+      "totalEarned": 0,
+      "totalBalance": 0,
+      "totalPosts": 0,
+      "vipTier": 0,
+      "joinedDate": "2026-08-29"
+    },
+    {
+      "id": "user-1788040302121-9pb25",
+      "fullName": "charles",
+      "emailOrPhone": "pc0005@gmail.com",
+      "password": "precious",
+      "isAdminEligible": false,
+      "isBlocked": false,
+      "totalEarned": 0,
+      "totalBalance": 0,
+      "totalPosts": 0,
+      "vipTier": 0,
+      "joinedDate": "2026-08-29"
+    },
+    {
+      "id": "user-1788038294458-j2pc7",
+      "fullName": "precious",
+      "emailOrPhone": "precious09136@gmail.com",
+      "password": "precious",
+      "inviteCode": "MBKBLOODLINE",
+      "isAdminEligible": true,
+      "isBlocked": false,
+      "totalEarned": 0,
+      "totalBalance": 0,
+      "totalPosts": 0,
+      "vipTier": 0,
+      "joinedDate": "2026-08-29"
+    },
+    {
+      "id": "user-1788038247059-2do6v",
+      "fullName": "Davie",
+      "emailOrPhone": "08030619144",
+      "password": "davie",
+      "isAdminEligible": false,
+      "isBlocked": false,
+      "totalEarned": 0,
+      "totalBalance": 0,
+      "totalPosts": 0,
+      "vipTier": 0,
+      "joinedDate": "2026-08-29"
+    }
+  ],
+  "submissions": [],
+  "withdrawals": [],
+  "announcements": [
+    {
+      "id": "news-1",
+      "title": "⚡ Weekend Creator Payout Batch is Live!",
+      "content": "All pending submissions and withdrawals are being processed by automated compliance. Sunday payments are scheduled for prompt disbursal to all Nigerian banks.",
+      "author": "Admin Desk",
+      "publishedAt": "Today at 09:30 AM",
+      "isPinned": true,
+      "tag": "PROMO"
+    },
+    {
+      "id": "news-2",
+      "title": "🎉 Creator Milestone: Precious Joy Wins ₦150,000 Cash!",
+      "content": "Precious Joy just reached her 30th verified creator video milestone! She just won a ₦150,000 cash bonus sent directly to her registered bank account. Big congratulations!",
+      "author": "Official Bulletin",
+      "publishedAt": "Yesterday at 04:15 PM",
+      "isPinned": true,
+      "tag": "WINNER"
+    },
+    {
+      "id": "news-3",
+      "title": "⏰ Race to Month-End Prize Pool!",
+      "content": "You have from now until month end to win grand bonus rewards. Do more verified tasks to boost your position on the leaderboards and claim instant payouts!",
+      "author": "Rewards Desk",
+      "publishedAt": "2 days ago",
+      "isPinned": false,
+      "tag": "ALERT"
+    }
+  ],
+  "messages": [],
+  "vipPurchases": []
+}

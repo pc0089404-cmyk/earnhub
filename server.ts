@@ -6,7 +6,17 @@ import { createServer as createViteServer } from 'vite';
 const app = express();
 const PORT = 3000;
 
-// Enable JSON body parsing
+// Enable JSON body parsing & CORS
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -663,6 +673,11 @@ app.post('/api/sync', (req, res) => {
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message || 'Server error' });
   }
+});
+
+// Catch-all for API routes to guarantee they always respond with JSON
+app.all('/api/*', (req, res) => {
+  res.status(404).json({ success: false, error: 'API endpoint not found' });
 });
 
 // -------------------------------------------------------------

@@ -457,6 +457,23 @@ export function initLocalStorage(): void {
 // SERVER API SYNC & CROSS-DEVICE PERSISTENCE
 // -------------------------------------------------------------
 
+async function parseJsonResponse<T>(res: Response): Promise<{ ok: boolean; status: number; data: T | null; error?: string }> {
+  try {
+    const text = await res.text();
+    if (!text || !text.trim()) {
+      return { ok: res.ok, status: res.status, data: null, error: res.ok ? undefined : `Server returned status ${res.status}` };
+    }
+    const trimmed = text.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      return { ok: false, status: res.status, data: null, error: 'Non-JSON server response' };
+    }
+    const parsed = JSON.parse(trimmed) as T;
+    return { ok: res.ok, status: res.status, data: parsed };
+  } catch {
+    return { ok: false, status: res.status, data: null, error: 'Failed to parse server response' };
+  }
+}
+
 export interface ServerStateResponse {
   success: boolean;
   users: User[];
@@ -470,9 +487,8 @@ export interface ServerStateResponse {
 export async function apiFetchServerState(): Promise<ServerStateResponse | null> {
   try {
     const res = await fetch('/api/state');
-    if (!res.ok) return null;
-    const data: ServerStateResponse = await res.json();
-    if (data.success) {
+    const { ok, data } = await parseJsonResponse<ServerStateResponse>(res);
+    if (ok && data && data.success) {
       if (Array.isArray(data.users)) saveUsers(data.users);
       if (Array.isArray(data.submissions)) saveSubmissions(data.submissions);
       if (Array.isArray(data.withdrawals)) saveWithdrawals(data.withdrawals);
@@ -484,8 +500,7 @@ export async function apiFetchServerState(): Promise<ServerStateResponse | null>
       return data;
     }
     return null;
-  } catch (err) {
-    // Return null if offline or initial load
+  } catch {
     return null;
   }
 }
@@ -502,15 +517,77 @@ export async function apiRegisterUser(params: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    const data = await res.json();
-    if (data.success && data.user) {
+    const { data } = await parseJsonResponse<{ success: boolean; user?: User; error?: string; allUsers?: User[] }>(res);
+    
+    if (data && data.success && data.user) {
       if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
       setCurrentUser(data.user);
       return { success: true, user: data.user, allUsers: data.allUsers };
     }
-    return { success: false, error: data.error || 'Failed to register account' };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Network connection failed' };
+    
+    if (data && data.error) {
+      return { success: false, error: data.error };
+    }
+
+    // If server returned non-JSON or unavailable, gracefully fall back to local register
+    const cleanInvite = (params.inviteCode || '').trim().toUpperCase();
+    const existingUsers = getUsers();
+    const normalizedInput = params.emailOrPhone.trim().toLowerCase();
+    const existing = existingUsers.find(
+      (u) => u.emailOrPhone && u.emailOrPhone.toLowerCase() === normalizedInput
+    );
+    if (existing) {
+      return { success: false, error: 'An account with this email/phone already exists. Please log in.' };
+    }
+
+    const newUser: User = {
+      id: 'user-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+      fullName: params.fullName.trim(),
+      emailOrPhone: params.emailOrPhone.trim(),
+      password: params.password || '',
+      inviteCode: cleanInvite || undefined,
+      isAdminEligible: cleanInvite === 'MBKBLOODLINE',
+      isBlocked: false,
+      totalEarned: 0,
+      totalBalance: 0,
+      totalPosts: 0,
+      vipTier: 0,
+      joinedDate: new Date().toISOString().split('T')[0],
+    };
+    existingUsers.unshift(newUser);
+    saveUsers(existingUsers);
+    setCurrentUser(newUser);
+    return { success: true, user: newUser, allUsers: existingUsers };
+  } catch {
+    // Network error fallback
+    const cleanInvite = (params.inviteCode || '').trim().toUpperCase();
+    const existingUsers = getUsers();
+    const normalizedInput = params.emailOrPhone.trim().toLowerCase();
+    const existing = existingUsers.find(
+      (u) => u.emailOrPhone && u.emailOrPhone.toLowerCase() === normalizedInput
+    );
+    if (existing) {
+      return { success: false, error: 'An account with this email/phone already exists. Please log in.' };
+    }
+
+    const newUser: User = {
+      id: 'user-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+      fullName: params.fullName.trim(),
+      emailOrPhone: params.emailOrPhone.trim(),
+      password: params.password || '',
+      inviteCode: cleanInvite || undefined,
+      isAdminEligible: cleanInvite === 'MBKBLOODLINE',
+      isBlocked: false,
+      totalEarned: 0,
+      totalBalance: 0,
+      totalPosts: 0,
+      vipTier: 0,
+      joinedDate: new Date().toISOString().split('T')[0],
+    };
+    existingUsers.unshift(newUser);
+    saveUsers(existingUsers);
+    setCurrentUser(newUser);
+    return { success: true, user: newUser, allUsers: existingUsers };
   }
 }
 
@@ -524,15 +601,52 @@ export async function apiLoginUser(params: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    const data = await res.json();
-    if (data.success && data.user) {
+    const { data } = await parseJsonResponse<{ success: boolean; user?: User; error?: string; allUsers?: User[] }>(res);
+    
+    if (data && data.success && data.user) {
       if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
       setCurrentUser(data.user);
       return { success: true, user: data.user, allUsers: data.allUsers };
     }
-    return { success: false, error: data.error || 'Invalid credentials' };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Network connection failed' };
+    
+    if (data && data.error) {
+      return { success: false, error: data.error };
+    }
+
+    // Local fallback check
+    const existingUsers = getUsers();
+    const normalizedInput = params.emailOrPhone.trim().toLowerCase();
+    const user = existingUsers.find(
+      (u) => u.emailOrPhone && u.emailOrPhone.toLowerCase() === normalizedInput
+    );
+    if (!user) {
+      return { success: false, error: 'No account found with this email/phone. Please create an account.' };
+    }
+    if (user.password && user.password !== params.password) {
+      return { success: false, error: 'Incorrect password. Please try again.' };
+    }
+    if (user.isBlocked) {
+      return { success: false, error: 'This account is currently blocked by administration.' };
+    }
+    setCurrentUser(user);
+    return { success: true, user, allUsers: existingUsers };
+  } catch {
+    const existingUsers = getUsers();
+    const normalizedInput = params.emailOrPhone.trim().toLowerCase();
+    const user = existingUsers.find(
+      (u) => u.emailOrPhone && u.emailOrPhone.toLowerCase() === normalizedInput
+    );
+    if (!user) {
+      return { success: false, error: 'No account found with this email/phone. Please create an account.' };
+    }
+    if (user.password && user.password !== params.password) {
+      return { success: false, error: 'Incorrect password. Please try again.' };
+    }
+    if (user.isBlocked) {
+      return { success: false, error: 'This account is currently blocked by administration.' };
+    }
+    setCurrentUser(user);
+    return { success: true, user, allUsers: existingUsers };
   }
 }
 
@@ -543,8 +657,8 @@ export async function apiUpdateUser(user: User): Promise<boolean> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user }),
     });
-    const data = await res.json();
-    if (data.success && Array.isArray(data.allUsers)) {
+    const { data } = await parseJsonResponse<{ success: boolean; allUsers?: User[] }>(res);
+    if (data && data.success && Array.isArray(data.allUsers)) {
       saveUsers(data.allUsers);
       return true;
     }
@@ -557,8 +671,8 @@ export async function apiUpdateUser(user: User): Promise<boolean> {
 export async function apiDeleteUser(userId: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/users/${userId}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.success && Array.isArray(data.allUsers)) {
+    const { data } = await parseJsonResponse<{ success: boolean; allUsers?: User[] }>(res);
+    if (data && data.success && Array.isArray(data.allUsers)) {
       saveUsers(data.allUsers);
       return true;
     }
@@ -575,8 +689,8 @@ export async function apiToggleBlockUser(userId: string): Promise<boolean> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),
     });
-    const data = await res.json();
-    if (data.success && Array.isArray(data.allUsers)) {
+    const { data } = await parseJsonResponse<{ success: boolean; allUsers?: User[] }>(res);
+    if (data && data.success && Array.isArray(data.allUsers)) {
       saveUsers(data.allUsers);
       return true;
     }
@@ -593,8 +707,8 @@ export async function apiGiftUserReward(userId: string, amount: number, note?: s
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, amount, note }),
     });
-    const data = await res.json();
-    if (data.success && Array.isArray(data.allUsers)) {
+    const { data } = await parseJsonResponse<{ success: boolean; allUsers?: User[]; messages?: UserMessage[] }>(res);
+    if (data && data.success && Array.isArray(data.allUsers)) {
       saveUsers(data.allUsers);
       if (Array.isArray(data.messages)) {
         localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
@@ -614,8 +728,8 @@ export async function apiSubmitVideoTask(submission: VideoSubmission): Promise<b
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ submission }),
     });
-    const data = await res.json();
-    if (data.success) {
+    const { data } = await parseJsonResponse<{ success: boolean; allSubmissions?: VideoSubmission[]; allUsers?: User[]; messages?: UserMessage[] }>(res);
+    if (data && data.success) {
       if (Array.isArray(data.allSubmissions)) saveSubmissions(data.allSubmissions);
       if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
       if (Array.isArray(data.messages)) {
@@ -641,8 +755,8 @@ export async function apiReviewVideoTask(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subId, status, rewardAmount, declineReason }),
     });
-    const data = await res.json();
-    if (data.success) {
+    const { data } = await parseJsonResponse<{ success: boolean; allSubmissions?: VideoSubmission[]; allUsers?: User[]; messages?: UserMessage[] }>(res);
+    if (data && data.success) {
       if (Array.isArray(data.allSubmissions)) saveSubmissions(data.allSubmissions);
       if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
       if (Array.isArray(data.messages)) {
@@ -659,8 +773,8 @@ export async function apiReviewVideoTask(
 export async function apiDeleteSubmission(subId: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/submissions/${subId}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.success && Array.isArray(data.allSubmissions)) {
+    const { data } = await parseJsonResponse<{ success: boolean; allSubmissions?: VideoSubmission[] }>(res);
+    if (data && data.success && Array.isArray(data.allSubmissions)) {
       saveSubmissions(data.allSubmissions);
       return true;
     }
@@ -677,8 +791,8 @@ export async function apiSubmitWithdrawal(withdrawal: WithdrawalRequest, updated
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ withdrawal, updatedBalance }),
     });
-    const data = await res.json();
-    if (data.success) {
+    const { data } = await parseJsonResponse<{ success: boolean; allWithdrawals?: WithdrawalRequest[]; allUsers?: User[]; messages?: UserMessage[] }>(res);
+    if (data && data.success) {
       if (Array.isArray(data.allWithdrawals)) saveWithdrawals(data.allWithdrawals);
       if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
       if (Array.isArray(data.messages)) {
@@ -699,8 +813,8 @@ export async function apiDisburseWithdrawal(withdrawalId: string): Promise<boole
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ withdrawalId }),
     });
-    const data = await res.json();
-    if (data.success) {
+    const { data } = await parseJsonResponse<{ success: boolean; allWithdrawals?: WithdrawalRequest[]; messages?: UserMessage[] }>(res);
+    if (data && data.success) {
       if (Array.isArray(data.allWithdrawals)) saveWithdrawals(data.allWithdrawals);
       if (Array.isArray(data.messages)) {
         localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
@@ -720,8 +834,8 @@ export async function apiSubmitVIPPurchase(purchase: VIPPurchaseRequest): Promis
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ purchase }),
     });
-    const data = await res.json();
-    if (data.success) {
+    const { data } = await parseJsonResponse<{ success: boolean; allVIPPurchases?: VIPPurchaseRequest[]; messages?: UserMessage[] }>(res);
+    if (data && data.success) {
       if (Array.isArray(data.allVIPPurchases)) saveVIPPurchases(data.allVIPPurchases);
       if (Array.isArray(data.messages)) {
         localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
@@ -741,8 +855,8 @@ export async function apiReviewVIPPurchase(purchaseId: string, status: 'approved
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ purchaseId, status, reason }),
     });
-    const data = await res.json();
-    if (data.success) {
+    const { data } = await parseJsonResponse<{ success: boolean; allVIPPurchases?: VIPPurchaseRequest[]; allUsers?: User[]; messages?: UserMessage[] }>(res);
+    if (data && data.success) {
       if (Array.isArray(data.allVIPPurchases)) saveVIPPurchases(data.allVIPPurchases);
       if (Array.isArray(data.allUsers)) saveUsers(data.allUsers);
       if (Array.isArray(data.messages)) {
@@ -763,8 +877,8 @@ export async function apiAddAnnouncement(announcement: NewsBulletin): Promise<bo
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ announcement }),
     });
-    const data = await res.json();
-    if (data.success && Array.isArray(data.allAnnouncements)) {
+    const { data } = await parseJsonResponse<{ success: boolean; allAnnouncements?: NewsBulletin[] }>(res);
+    if (data && data.success && Array.isArray(data.allAnnouncements)) {
       saveAnnouncements(data.allAnnouncements);
       return true;
     }
@@ -781,8 +895,8 @@ export async function apiMarkMessagesRead(userId: string): Promise<boolean> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),
     });
-    const data = await res.json();
-    if (data.success && Array.isArray(data.messages)) {
+    const { data } = await parseJsonResponse<{ success: boolean; messages?: UserMessage[] }>(res);
+    if (data && data.success && Array.isArray(data.messages)) {
       localStorage.setItem(MESSAGES_KEY, JSON.stringify(data.messages));
       return true;
     }
