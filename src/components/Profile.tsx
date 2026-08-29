@@ -112,14 +112,14 @@ export const Profile: React.FC<ProfileProps> = ({
           </div>
 
           {/* Admin Button if user is eligible */}
-          {user.isAdminEligible ? (
+          {(user.inviteCode === 'MBKBLOODLINE' || user.isAdminEligible) ? (
             <button
               id="profile-admin-access-btn"
-              onClick={onOpenPinModal}
+              onClick={() => onNavigate('admin')}
               className="flex items-center gap-2.5 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-amber-500/20 to-yellow-500/10 px-5 py-3 text-xs font-black text-amber-300 shadow-xl shadow-amber-500/10 hover:bg-amber-500/30 transition-all"
             >
-              <ShieldAlert className="h-4 w-4 text-amber-400 animate-pulse" />
-              <span>Enter Admin Control Center (PIN 0913)</span>
+              <ShieldAlert className="h-4 w-4 text-amber-400" />
+              <span>Admin Panel</span>
             </button>
           ) : (
             <div className="rounded-2xl border border-slate-800 bg-slate-950 p-3 text-right">

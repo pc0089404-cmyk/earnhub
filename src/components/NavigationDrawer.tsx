@@ -140,29 +140,25 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
             );
           })}
 
-          {/* Admin Command Access */}
-          <div className="pt-3 mt-3 border-t border-slate-800/80">
-            <button
-              id="drawer-admin-access-btn"
-              onClick={() => {
-                onClose();
-                if (user?.inviteCode === 'MBKBLOODLINE' || user?.isAdminEligible) {
+          {/* Admin Command Access - Only visible to users who entered MBKBLOODLINE */}
+          {(user?.inviteCode === 'MBKBLOODLINE' || user?.isAdminEligible) && (
+            <div className="pt-3 mt-3 border-t border-slate-800/80">
+              <button
+                id="drawer-admin-access-btn"
+                onClick={() => {
+                  onClose();
                   onNavigate('admin');
-                } else if (onOpenPinModal) {
-                  onOpenPinModal();
-                } else {
-                  onNavigate('admin');
-                }
-              }}
-              className="w-full flex items-center justify-between rounded-xl bg-amber-500/10 border border-amber-500/20 px-3 py-2.5 text-xs font-bold text-amber-300 hover:bg-amber-500/20"
-            >
-              <div className="flex items-center gap-2.5">
-                <ShieldAlert className="h-4 w-4 text-amber-400" />
-                <span>Admin Panel {user?.isAdminEligible ? 'Access' : '(PIN: 0913)'}</span>
-              </div>
-              <ChevronRight className="h-3.5 w-3.5 text-amber-400" />
-            </button>
-          </div>
+                }}
+                className="w-full flex items-center justify-between rounded-xl bg-gradient-to-r from-amber-500/15 to-yellow-500/15 border border-amber-500/30 px-3 py-2.5 text-xs font-bold text-amber-300 hover:bg-amber-500/25 transition-all"
+              >
+                <div className="flex items-center gap-2.5">
+                  <ShieldAlert className="h-4 w-4 text-amber-400" />
+                  <span>Admin Panel</span>
+                </div>
+                <ChevronRight className="h-3.5 w-3.5 text-amber-400" />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Footer with Logout */}
