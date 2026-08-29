@@ -26,17 +26,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess }) => {
     setError(null);
 
     if (!emailOrPhone.trim() || !password.trim()) {
-      setError('Please provide your login credentials.');
+      setError('⚠️ Please fill in all required fields.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('⚠️ Password must be at least 6 characters.');
       return;
     }
 
     if (isSignUp) {
       if (isEighteenPlus !== true) {
-        setError('You must confirm that you are 18+ years old to join EarnHub.');
+        setError('⚠️ You must confirm that you are 18+ years old to join EarnHub.');
         return;
       }
       if (!fullName.trim()) {
-        setError('Please provide your full name for creator bank verification.');
+        setError('⚠️ Please provide your full name for creator bank verification.');
         return;
       }
     }
