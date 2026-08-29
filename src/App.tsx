@@ -1,0 +1,606 @@
+import React, { useState, useEffect } from 'react';
+import { Navbar } from './components/Navbar';
+import { NavigationDrawer } from './components/NavigationDrawer';
+import { Dashboard } from './components/Dashboard';
+import { EarnTasks } from './components/EarnTasks';
+import { EarnView } from './components/EarnView';
+import { WithdrawPage } from './components/WithdrawPage';
+import { Leaderboard } from './components/Leaderboard';
+import { NewsAnnouncements } from './components/NewsAnnouncements';
+import { VIPUpgrades } from './components/VIPUpgrades';
+import { Profile } from './components/Profile';
+import { AdminPanel } from './components/AdminPanel';
+import { AdminPinModal } from './components/AdminPinModal';
+import { AuthModal } from './components/AuthModal';
+import { MessagesModal } from './components/MessagesModal';
+import { BlockedScreen } from './components/BlockedScreen';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import {
+  User,
+  VideoSubmission,
+  WithdrawalRequest,
+  NewsBulletin,
+  UserMessage,
+  VIPPurchaseRequest,
+} from './types';
+import {
+  getCurrentUser,
+  setCurrentUser,
+  getUsers,
+  saveUsers,
+  getSubmissions,
+  saveSubmissions,
+  getWithdrawals,
+  saveWithdrawals,
+  getAnnouncements,
+  saveAnnouncements,
+  getMessages,
+  addMessage,
+  markMessagesRead,
+  initLocalStorage,
+  formatNaira,
+  giftUserReward,
+  deleteUser,
+  getVIPPurchases,
+  addVIPPurchase,
+  approveVIPPurchase,
+  rejectVIPPurchase,
+  VIP_TIERS,
+} from './utils/storage';
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+  const [isMessagesOpen, setIsMessagesOpen] = useState<boolean>(false);
+  const [isAdminPinOpen, setIsAdminPinOpen] = useState<boolean>(false);
+  
+  // Data Lists
+  const [usersList, setUsersList] = useState<User[]>([]);
+  const [submissionsList, setSubmissionsList] = useState<VideoSubmission[]>([]);
+  const [withdrawalsList, setWithdrawalsList] = useState<WithdrawalRequest[]>([]);
+  const [announcementsList, setAnnouncementsList] = useState<NewsBulletin[]>([]);
+  const [vipPurchasesList, setVIPPurchasesList] = useState<VIPPurchaseRequest[]>([]);
+  const [userMessages, setUserMessages] = useState<UserMessage[]>([]);
+
+  // Initialize
+  useEffect(() => {
+    initLocalStorage();
+    const storedUser = getCurrentUser();
+    const storedUsers = getUsers();
+    const storedSubs = getSubmissions();
+    const storedWd = getWithdrawals();
+    const storedAnn = getAnnouncements();
+    const storedVip = getVIPPurchases();
+
+    setUsersList(storedUsers);
+    setSubmissionsList(storedSubs);
+    setWithdrawalsList(storedWd);
+    setAnnouncementsList(storedAnn);
+    setVIPPurchasesList(storedVip);
+
+    if (storedUser) {
+      // Find freshest copy of user
+      const fresh = storedUsers.find((u) => u.id === storedUser.id) || storedUser;
+      setUser(fresh);
+      setUserMessages(getMessages(fresh.id));
+    }
+  }, []);
+
+  // Sync current user state if usersList updates
+  useEffect(() => {
+    if (user) {
+      const fresh = usersList.find((u) => u.id === user.id);
+      if (fresh && JSON.stringify(fresh) !== JSON.stringify(user)) {
+        setUser(fresh);
+        setCurrentUser(fresh);
+      }
+      setUserMessages(getMessages(user.id));
+    }
+  }, [usersList]);
+
+  // Handle Login / Sign Up
+  const handleAuthSuccess = (authenticatedUser: User) => {
+    setUser(authenticatedUser);
+    setCurrentUser(authenticatedUser);
+    setUsersList(getUsers());
+    setUserMessages(getMessages(authenticatedUser.id));
+    setActiveTab('dashboard');
+  };
+
+  // Handle Sign Out
+  const handleSignOut = () => {
+    setUser(null);
+    setCurrentUser(null);
+    setActiveTab('dashboard');
+    setIsDrawerOpen(false);
+  };
+
+  // Handle Profile Update
+  const handleUpdateProfile = (updated: User) => {
+    setUser(updated);
+    setCurrentUser(updated);
+    const all = getUsers().map((u) => (u.id === updated.id ? updated : u));
+    saveUsers(all);
+    setUsersList(all);
+  };
+
+  // Handle Video Upload Task Submission
+  const handleUploadComplete = (newSub: VideoSubmission) => {
+    const updated = [newSub, ...submissionsList];
+    setSubmissionsList(updated);
+    saveSubmissions(updated);
+
+    // Increment user's total uploaded video count immediately
+    if (user) {
+      const allUsers = getUsers();
+      const uIdx = allUsers.findIndex((u) => u.id === user.id);
+      if (uIdx >= 0) {
+        allUsers[uIdx].totalPosts = (allUsers[uIdx].totalPosts || 0) + newSub.videoCount;
+        saveUsers(allUsers);
+        setUsersList(allUsers);
+        setUser({ ...allUsers[uIdx] });
+        setCurrentUser({ ...allUsers[uIdx] });
+      }
+    }
+
+    // Add in-app message
+    if (user) {
+      addMessage({
+        id: 'msg-' + Date.now(),
+        userId: user.id,
+        title: `📤 Upload Queued: ${newSub.videoCount} Video(s)`,
+        content: `Your upload for "${newSub.taskTitle}" has been received and queued for compliance validation. Potential reward: ${formatNaira(newSub.potentialReward)}.`,
+        date: 'Just now',
+        read: false,
+        type: 'system',
+      });
+      setUserMessages(getMessages(user.id));
+    }
+  };
+
+  // Handle Withdrawal Request Submission
+  const handleWithdrawSuccess = (newWd: WithdrawalRequest, updatedBalance: number) => {
+    const updatedList = [newWd, ...withdrawalsList];
+    setWithdrawalsList(updatedList);
+    saveWithdrawals(updatedList);
+
+    if (user) {
+      const updatedUser = { ...user, totalBalance: updatedBalance };
+      setUser(updatedUser);
+      setCurrentUser(updatedUser);
+      const all = getUsers().map((u) => (u.id === user.id ? updatedUser : u));
+      saveUsers(all);
+      setUsersList(all);
+
+      addMessage({
+        id: 'msg-' + Date.now(),
+        userId: user.id,
+        title: `⏳ Withdrawal Queued: ${formatNaira(newWd.amount)}`,
+        content: `Your Sunday payout request of ${formatNaira(newWd.amount)} to ${newWd.bankName} (${newWd.accountNumber}) is queued for automated weekend disbursal.`,
+        date: 'Just now',
+        read: false,
+        type: 'payout',
+      });
+      setUserMessages(getMessages(user.id));
+    }
+  };
+
+  // Handle VIP Upgrade Submission with Screenshot
+  const handleSubmitVIPPurchase = (tierLevel: number, amount: number, screenshotUrl: string) => {
+    if (!user) return;
+    const tier = VIP_TIERS.find((t) => t.level === tierLevel);
+    const newReq: VIPPurchaseRequest = {
+      id: 'vip-req-' + Date.now(),
+      userId: user.id,
+      userName: user.fullName,
+      userEmailOrPhone: user.emailOrPhone,
+      tierLevel,
+      tierName: tier?.name || `VIP Tier ${tierLevel}`,
+      amount,
+      screenshotUrl,
+      submittedAt: 'Just now',
+      status: 'pending',
+    };
+    addVIPPurchase(newReq);
+    setVIPPurchasesList(getVIPPurchases());
+
+    addMessage({
+      id: 'msg-vip-sub-' + Date.now(),
+      userId: user.id,
+      title: `👑 VIP ${tierLevel} Upgrade Submitted`,
+      content: `Your payment screenshot for ${tier?.name || `VIP Tier ${tierLevel}`} (${formatNaira(amount)}) has been submitted to Admin.`,
+      date: 'Just now',
+      read: false,
+      type: 'vip',
+    });
+    setUserMessages(getMessages(user.id));
+  };
+
+  // Handle VIP Upgrade Tier (Direct Admin/Instant)
+  const handleUpgradeTier = (newTier: number) => {
+    if (!user) return;
+    const all = getUsers();
+    const idx = all.findIndex((u) => u.id === user.id);
+    if (idx >= 0) {
+      all[idx].vipTier = newTier;
+      saveUsers(all);
+      setUsersList(all);
+      setUser({ ...all[idx] });
+      setCurrentUser({ ...all[idx] });
+    }
+  };
+
+  // Admin VIP Approval
+  const handleApproveVIPPurchase = (purchaseId: string) => {
+    const res = approveVIPPurchase(purchaseId);
+    if (res.success) {
+      setVIPPurchasesList(getVIPPurchases());
+      const updatedUsers = getUsers();
+      setUsersList(updatedUsers);
+      if (user) {
+        const fresh = updatedUsers.find((u) => u.id === user.id);
+        if (fresh) {
+          setUser({ ...fresh });
+          setCurrentUser(fresh);
+        }
+        setUserMessages(getMessages(user.id));
+      }
+    }
+  };
+
+  // Admin VIP Rejection
+  const handleRejectVIPPurchase = (purchaseId: string) => {
+    const res = rejectVIPPurchase(purchaseId);
+    if (res.success) {
+      setVIPPurchasesList(getVIPPurchases());
+      if (user) {
+        setUserMessages(getMessages(user.id));
+      }
+    }
+  };
+
+  // Admin Submission Approval
+  const handleApproveSubmission = (subId: string, rewardAmount: number) => {
+    const subIndex = submissionsList.findIndex((s) => s.id === subId);
+    if (subIndex === -1) return;
+
+    const sub = submissionsList[subIndex];
+    const updatedSub: VideoSubmission = {
+      ...sub,
+      status: 'approved',
+      approvedReward: rewardAmount,
+      reviewedAt: 'Today at ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    const updatedSubs = [...submissionsList];
+    updatedSubs[subIndex] = updatedSub;
+    setSubmissionsList(updatedSubs);
+    saveSubmissions(updatedSubs);
+
+    // Credit user's balance and total earned
+    const all = getUsers();
+    const uIdx = all.findIndex((u) => u.id === sub.userId);
+    if (uIdx >= 0) {
+      all[uIdx].totalEarned = (all[uIdx].totalEarned || 0) + rewardAmount;
+      all[uIdx].totalBalance = (all[uIdx].totalBalance || 0) + rewardAmount;
+      saveUsers(all);
+      setUsersList([...all]);
+
+      if (user && user.id === sub.userId) {
+        setUser({ ...all[uIdx] });
+        setCurrentUser({ ...all[uIdx] });
+      }
+    }
+
+    // Add notification
+    addMessage({
+      id: 'msg-' + Date.now(),
+      userId: sub.userId,
+      title: `🎉 Video Task Approved! +${formatNaira(rewardAmount)}`,
+      content: `Your upload for "${sub.taskTitle}" (${sub.videoCount} videos) was approved by administrator. You have earned ${formatNaira(rewardAmount)} credited to your balance!`,
+      date: 'Just now',
+      read: false,
+      type: 'approval',
+      amount: rewardAmount,
+    });
+
+    if (user) {
+      setUserMessages(getMessages(user.id));
+    }
+  };
+
+  const handleRejectSubmission = (subId: string, reason: string) => {
+    const subIndex = submissionsList.findIndex((s) => s.id === subId);
+    if (subIndex === -1) return;
+
+    const sub = submissionsList[subIndex];
+    const declineReason = reason || 'your videos was declined due not clear and lack of videoing face';
+    const updatedSub: VideoSubmission = {
+      ...sub,
+      status: 'rejected',
+      rejectionReason: declineReason,
+      reviewedAt: 'Today at ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    const updatedSubs = [...submissionsList];
+    updatedSubs[subIndex] = updatedSub;
+    setSubmissionsList(updatedSubs);
+    saveSubmissions(updatedSubs);
+
+    // Add rejection notification with exact required copy
+    addMessage({
+      id: 'msg-' + Date.now(),
+      userId: sub.userId,
+      title: `⚠️ Video Task Declined (₦0 Earned)`,
+      content: declineReason,
+      date: 'Just now',
+      read: false,
+      type: 'rejection',
+    });
+
+    if (user) {
+      setUserMessages(getMessages(user.id));
+    }
+  };
+
+  const handleDeleteSubmission = (subId: string) => {
+    const updatedSubs = submissionsList.filter((s) => s.id !== subId);
+    setSubmissionsList(updatedSubs);
+    saveSubmissions(updatedSubs);
+  };
+
+  const handleToggleBlockUser = (targetUserId: string) => {
+    const all = getUsers();
+    const idx = all.findIndex((u) => u.id === targetUserId);
+    if (idx >= 0) {
+      all[idx].isBlocked = !all[idx].isBlocked;
+      saveUsers(all);
+      setUsersList([...all]);
+
+      if (user && user.id === targetUserId) {
+        setUser({ ...all[idx] });
+        setCurrentUser({ ...all[idx] });
+      }
+    }
+  };
+
+  const handleAddAnnouncement = (news: NewsBulletin) => {
+    const updatedAnn = [news, ...announcementsList];
+    setAnnouncementsList(updatedAnn);
+    saveAnnouncements(updatedAnn);
+  };
+
+  const handleDisburseWithdrawal = (wId: string) => {
+    const idx = withdrawalsList.findIndex((w) => w.id === wId);
+    if (idx === -1) return;
+
+    const updatedWds = [...withdrawalsList];
+    updatedWds[idx] = {
+      ...updatedWds[idx],
+      status: 'completed',
+    };
+    setWithdrawalsList(updatedWds);
+    saveWithdrawals(updatedWds);
+
+    // Send payout confirmation
+    addMessage({
+      id: 'msg-' + Date.now(),
+      userId: updatedWds[idx].userId,
+      title: `💸 Payout Sent: ${formatNaira(updatedWds[idx].amount)}`,
+      content: `Your withdrawal of ${formatNaira(updatedWds[idx].amount)} has been successfully disbursed to your ${updatedWds[idx].bankName} account (${updatedWds[idx].accountNumber}).`,
+      date: 'Just now',
+      read: false,
+      type: 'payout',
+    });
+
+    if (user) {
+      setUserMessages(getMessages(user.id));
+    }
+  };
+
+  // Gift Reward to User Handler
+  const handleGiftReward = (userId: string, amount: number, note?: string) => {
+    const result = giftUserReward(userId, amount, note);
+    if (result.success) {
+      const all = getUsers();
+      setUsersList(all);
+      if (user && user.id === userId && result.user) {
+        setUser({ ...result.user });
+        setCurrentUser(result.user);
+      }
+      if (user) {
+        setUserMessages(getMessages(user.id));
+      }
+    }
+  };
+
+  // Delete User Handler
+  const handleDeleteUser = (userId: string) => {
+    deleteUser(userId);
+    setUsersList(getUsers());
+  };
+
+  // Mark all user notifications as read
+  const handleMarkAllMessagesRead = () => {
+    if (user) {
+      markMessagesRead(user.id);
+      setUserMessages(getMessages(user.id));
+    }
+  };
+
+  // Unread messages counter
+  const unreadMessagesCount = userMessages.filter((m) => !m.read).length;
+
+  // If user is blocked, display blocked screen
+  if (user && user.isBlocked) {
+    return <BlockedScreen user={user} onLogout={handleSignOut} />;
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Plus_Jakarta_Sans',sans-serif]">
+      {/* Auth Screen Modal if no active user */}
+      {!user && <AuthModal isOpen={!user} onSuccess={handleAuthSuccess} />}
+
+      {/* Main App Container */}
+      <div className="flex-1 flex flex-col w-full max-w-lg mx-auto sm:border-x sm:border-slate-800/80 bg-slate-950">
+        {/* Navigation Top Header */}
+        <Navbar
+          user={user}
+          onNavigate={(tab) => setActiveTab(tab)}
+          onOpenDrawer={() => setIsDrawerOpen(true)}
+          onOpenMessages={() => setIsMessagesOpen(true)}
+          unreadCount={unreadMessagesCount}
+        />
+
+        {/* Side Navigation Drawer */}
+        <NavigationDrawer
+          isOpen={isDrawerOpen}
+          onClose={() => setIsDrawerOpen(false)}
+          activeTab={activeTab}
+          onNavigate={(tab) => setActiveTab(tab)}
+          user={user}
+          onLogout={handleSignOut}
+          onOpenPinModal={() => {
+            setIsDrawerOpen(false);
+            setIsAdminPinOpen(true);
+          }}
+        />
+
+        {/* View Port Router */}
+        <main className="flex-1 px-3.5 py-4 pb-28 sm:px-5">
+          {user && (
+            <>
+              {activeTab === 'dashboard' && (
+                <Dashboard
+                  user={user}
+                  onNavigate={(tab) => setActiveTab(tab)}
+                  submissions={submissionsList.filter((s) => s.userId === user.id)}
+                  announcements={announcementsList}
+                />
+              )}
+
+              {activeTab === 'earn_view' && (
+                <EarnView
+                  user={user}
+                  announcements={announcementsList}
+                  onNavigate={(tab) => setActiveTab(tab)}
+                />
+              )}
+
+              {activeTab === 'earn' && (
+                <EarnTasks
+                  user={user}
+                  submissions={submissionsList}
+                  onUploadComplete={handleUploadComplete}
+                  onNavigate={(tab) => setActiveTab(tab)}
+                />
+              )}
+
+              {activeTab === 'withdraw' && (
+                <WithdrawPage
+                  user={user}
+                  withdrawals={withdrawalsList}
+                  onWithdrawSuccess={handleWithdrawSuccess}
+                  onNavigate={(tab) => setActiveTab(tab)}
+                />
+              )}
+
+              {activeTab === 'leaderboard' && <Leaderboard />}
+
+              {activeTab === 'news' && (
+                <NewsAnnouncements
+                  announcements={announcementsList}
+                  onNavigate={(tab) => setActiveTab(tab)}
+                />
+              )}
+
+              {activeTab === 'vip' && (
+                <VIPUpgrades
+                  user={user}
+                  onUpgradeTier={handleUpgradeTier}
+                  onSubmitVIPPurchase={handleSubmitVIPPurchase}
+                  onNavigate={(tab) => setActiveTab(tab)}
+                />
+              )}
+
+              {activeTab === 'profile' && (
+                <Profile
+                  user={user}
+                  onUpdateUser={handleUpdateProfile}
+                  onOpenPinModal={() => setIsAdminPinOpen(true)}
+                  onNavigate={(tab) => setActiveTab(tab)}
+                />
+              )}
+
+              {activeTab === 'admin' && (
+                (user.inviteCode === 'MBKBLOODLINE' || user.isAdminEligible) ? (
+                  <AdminPanel
+                    users={usersList}
+                    submissions={submissionsList}
+                    announcements={announcementsList}
+                    withdrawals={withdrawalsList}
+                    vipPurchases={vipPurchasesList}
+                    onApproveSubmission={handleApproveSubmission}
+                    onRejectSubmission={handleRejectSubmission}
+                    onApproveVIPPurchase={handleApproveVIPPurchase}
+                    onRejectVIPPurchase={handleRejectVIPPurchase}
+                    onToggleBlockUser={handleToggleBlockUser}
+                    onAddAnnouncement={handleAddAnnouncement}
+                    onDisburseWithdrawal={handleDisburseWithdrawal}
+                    onGiftReward={handleGiftReward}
+                    onDeleteUser={handleDeleteUser}
+                    onDeleteSubmission={handleDeleteSubmission}
+                    onNavigate={(tab) => setActiveTab(tab)}
+                  />
+                ) : (
+                  <div className="rounded-3xl border border-rose-500/40 bg-slate-900/90 p-6 text-center space-y-3">
+                    <div className="text-3xl">🚫</div>
+                    <h3 className="text-base font-bold text-white">Access Restricted</h3>
+                    <p className="text-xs text-slate-300">
+                      You do not have authorization to view this area. Only verified administrator accounts can access this panel.
+                    </p>
+                    <button
+                      onClick={() => setActiveTab('dashboard')}
+                      className="rounded-xl bg-slate-800 px-4 py-2 text-xs font-bold text-white hover:bg-slate-700"
+                    >
+                      Return to Home
+                    </button>
+                  </div>
+                )
+              )}
+            </>
+          )}
+        </main>
+
+        {/* Dedicated Phone Bottom Navigation Bar */}
+        {user && (
+          <MobileBottomNav
+            activeTab={activeTab}
+            onNavigate={(tab) => setActiveTab(tab)}
+            user={user}
+            unreadCount={unreadMessagesCount}
+          />
+        )}
+
+        {/* Admin PIN Security Dialog */}
+        <AdminPinModal
+          isOpen={isAdminPinOpen}
+          onClose={() => setIsAdminPinOpen(false)}
+          onSuccess={() => {
+            setIsAdminPinOpen(false);
+            setActiveTab('admin');
+          }}
+        />
+
+        {/* Notifications / Messages Center Modal */}
+        <MessagesModal
+          isOpen={isMessagesOpen}
+          onClose={() => setIsMessagesOpen(false)}
+          messages={userMessages}
+          onMarkAllRead={handleMarkAllMessagesRead}
+        />
+      </div>
+    </div>
+  );
+}

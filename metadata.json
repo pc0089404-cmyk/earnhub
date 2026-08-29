@@ -1,0 +1,6 @@
+{
+  "name": "EarnHub",
+  "description": "EarnHub Mobile Creator Monetization Platform - Complete video tasks, track earnings, unlock VIP multipliers, and withdraw directly to Nigerian bank accounts.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
